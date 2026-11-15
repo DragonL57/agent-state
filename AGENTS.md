@@ -281,9 +281,7 @@ ones that fire on a task type.
 | `todo` | Planning any 2+ step request: `todo list` first, then `todo create` | Single trivial steps, pure conversation |
 | `apple-design` | Any design, UI, or UX work, Apple platform or web: designing, reviewing, auditing, restyling, or fixing an interface, screen, layout, component, color, typography, icon, motion, or accessibility. Apple HIG is the single design authority | Backend, CLI, library, or data work with no page or screen in play |
 | `modern-web-guidance` | Web UI structure and client-side capability: which element or API to use, semantics, fallbacks, Baseline, accessibility mechanics, CWV, forms, security, PWA, wasm | Visual or UX judgment, layout composition, palette, typography hierarchy, HIG decisions |
-| `agentsmd-writing` | Creating or editing AGENTS.md, CLAUDE.md, or any context file | Editing a context file from memory |
+| `instruction-craft` | Writing or editing AGENTS.md, CLAUDE.md, a prompt template, a skill, or any instruction; deciding where a rule belongs; a session that has grown long | Editing an instruction from memory |
 | `browser-sessions` | Before the first browser call of any task | No browser in play |
 | `pi-state-sync` | Any `/pistate` command, or a task touching pi settings, skills, or the pi-state repository | Never |
 
-`apple-design` is the single design authority; `modern-web-guidance` may supply
-web platform implementation detail and never visual judgment.
