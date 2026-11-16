@@ -123,6 +123,37 @@ for src in "$kit"/agents/*.md; do
     render "$src" > "$out/agents/$(basename "$src")"
 done
 
+# The kit's agents carry no model, because the kit serves four harnesses and the
+# model is the harness's choice. This install resolves one model and effort per
+# agent into `.rig/models.json`, and the installer renders them into the agent
+# frontmatter. A render from the kit alone would erase them, so the same pins
+# are layered back on here and both writers agree on the file. fallback-runner
+# has no entry: its caller supplies a model.
+apply_model_pins() {
+    local models="$here/../.rig/models.json" agent name model effort
+    [ -f "$models" ] || return 0
+    while IFS=$'\t' read -r name model effort; do
+        [ -n "$name" ] || continue
+        agent="$out/agents/$name.md"
+        [ -f "$agent" ] || continue
+        awk -v model="$model" -v effort="$effort" '
+            BEGIN { fence = 0 }
+            /^---$/ {
+                fence++
+                if (fence == 2) print "model: " model
+            }
+            fence < 2 && /^thinking:/ { print "thinking: " effort; next }
+            { print }
+        ' "$agent" > "$agent.pinned" && mv "$agent.pinned" "$agent"
+    done < <(python3 -c '
+import json, sys
+saved = json.load(open(sys.argv[1]))
+for name, entry in sorted(saved.get("pi", {}).items()):
+    print("%s\t%s\t%s" % (name, entry.get("model", ""), entry.get("effort", "")))
+' "$models")
+}
+apply_model_pins
+
 # A rule that stopped matching leaves a kit path or an unqualified contract
 # reference in the output, which would send an agent to a file that does not
 # exist here.

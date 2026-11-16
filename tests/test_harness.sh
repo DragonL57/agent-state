@@ -25,8 +25,11 @@ trap 'rm -rf "$sandbox"' EXIT
 
 kit="$sandbox/kit with a space"
 install="$sandbox/install"
-mkdir -p "$kit/.rig/playbooks" "$kit/agents" "$install/rig/playbooks" "$install/agents"
+mkdir -p "$kit/.rig/playbooks" "$kit/agents" "$install/rig/playbooks" "$install/agents" "$install/.rig"
 cp "$repo/rig/sync.sh" "$install/rig/sync.sh"
+# The render layers this install's model pins back on, so the sandbox needs the
+# same file the install has, or these render tests would exercise another path.
+cp "$repo/.rig/models.json" "$install/.rig/models.json"
 printf 'Read `.rig/playbooks/design.md`.\n' > "$kit/.rig/playbooks/design.md"
 printf 'Read `AGENTS.md`.\n' > "$kit/agents/worker.md"
 
@@ -43,6 +46,23 @@ grep -q '~/.pi/agent/rig/playbooks/design.md' "$install/rig/playbooks/design.md"
     bad "the render left the kit path in the playbook"
 grep -q '~/.pi/agent/AGENTS.md' "$install/agents/worker.md" ||
     bad "the render left the contract reference unqualified"
+
+# A render from the kit must keep the install's model pins. The kit carries no
+# model, so a render that dropped them would put every reviewer back on the
+# session model, which is the defect the routing file exists to prevent.
+printf -- '---\ndescription: test agent\ntools: read\nthinking: high\n---\n\nBody.\n' > "$kit/agents/worker.md"
+printf '{"pi":{"worker":{"model":"mistral/deepseek-v4-1-flash-1017","effort":"low"}}}\n' \
+    > "$install/.rig/models.json"
+sync > /dev/null 2>&1 || bad "a render with model pins exited non-zero"
+grep -qxF 'model: mistral/deepseek-v4-1-flash-1017' "$install/agents/worker.md" \
+    || bad "the render dropped the model pin"
+grep -qxF 'thinking: low' "$install/agents/worker.md" \
+    || bad "the render did not apply the pinned effort"
+# Leave the sandbox as the later checks expect it: the kit's own worker file and
+# the install's real routing file, so a clean copy still checks clean.
+printf 'Read `AGENTS.md`.\n' > "$kit/agents/worker.md"
+cp "$repo/.rig/models.json" "$install/.rig/models.json"
+sync > /dev/null 2>&1
 ok
 
 # A clean copy checks clean.
@@ -138,12 +158,32 @@ elif [ "$default" != "0" ]; then
 fi
 ok
 
-# No agent may pin a model here; this install inherits the session model.
-for file in "$repo"/agents/*.md; do
-    if grep -q '^model:' "$file"; then
-        bad "$(basename "$file") pins a model"
-    fi
-done
+# Every pinned agent declares the model and effort .rig/models.json holds, so
+# the routing file is the one place a model changes and a hand edit to an agent
+# file is caught here. fallback-runner stays unpinned: its caller supplies one.
+models="$repo/.rig/models.json"
+[ -f "$models" ] || bad ".rig/models.json is missing"
+if [ -f "$models" ]; then
+    while IFS=$'\t' read -r agent model effort; do
+        file="$repo/agents/$agent.md"
+        [ -f "$file" ] || { bad "agents/$agent.md is missing"; continue; }
+        want="$model"
+        got="$(sed -n 's/^model: *//p' "$file" | head -1)"
+        [ "$got" = "$want" ] \
+            || bad "agents/$agent.md pins '${got:-nothing}', models.json holds '$want'"
+        [ -n "$effort" ] || continue
+        got="$(sed -n 's/^thinking: *//p' "$file" | head -1)"
+        [ "$got" = "$effort" ] \
+            || bad "agents/$agent.md thinks '${got:-nothing}', models.json holds '$effort'"
+    done < <(python3 -c '
+import json, sys
+saved = json.load(open(sys.argv[1]))
+for agent, entry in sorted(saved.get("pi", {}).items()):
+    print("%s\t%s\t%s" % (agent, entry.get("model", ""), entry.get("effort", "")))
+' "$models")
+    grep -q '^model:' "$repo/agents/fallback-runner.md" \
+        && bad "fallback-runner.md pins a model; its caller supplies one"
+fi
 ok
 
 # The contract's autonomy rules are load-bearing. A grant is what lets a run

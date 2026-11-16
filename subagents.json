@@ -1,4 +1,5 @@
 {
   "defaultMaxTurns": 0,
-  "viewerMarkdown": "all"
+  "viewerMarkdown": "all",
+  "workflowsEnabled": true
 }

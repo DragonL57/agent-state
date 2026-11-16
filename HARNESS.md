@@ -21,21 +21,39 @@ being true.
   under a grant, and the grant's "where a playbook or a skill asks, a grant
   answers" line settles the precedence. The kit copy still reads as binding, so
   land the matching clause there and re-render.
-- **Kit work: a verify skill per repo.** `skills/` has no equivalent of pstack's
-  `create-verification-skill`: a project-local feature map plus a driver CLI, so
-  a reviewer reads a screenshot instead of a diff. `browser-sessions` and the
-  chrome-devtools MCP are the runtime lane; the map and the driver are missing.
+- **Kit work: the kit checkout is now present.** `/home/thelong/rig` is cloned
+  at `8e6a8c3` and `rig/sync.sh --check` reports up to date, so the two items
+  first two items can be landed upstream and re-rendered instead of waiting.
+- **Kit work: `verify-app` belongs upstream.** The skill lives in this install
+  and is not in the kit, so a fresh clone loses it. Move it to
+  `rig/.agents/skills/` or a kit-owned skill directory, then re-render.
 
 ## Settled
 
-- **The global install inherits the session model.** No agent under
-  `~/.pi/agent/agents/` declares `model:`, and there is no `rig/models.json`.
-  `fallback-runner` gets its alternate model in the launch call. The kit's
-  target-repo install still pins per `models.sh`, so a repo gets
-  role-appropriate models; this install does not.
+- **`fallback-runner` stays unpinned.** Its caller supplies an explicit model,
+  because a fallback that inherits the writer's model is not a fallback. It is
+  the only agent under `agents/` without a `model:` line, and the test enforces
+  that.
+- **The global install routes models per role.** `.rig/models.json` holds one
+  model and effort per pinned agent, written by `rig/install.sh` and rendered
+  into `agents/*.md`. Every role runs `mistral/deepseek-v4-1-flash-1017`, the
+  only DeepSeek the Mistral provider carries here, and the effort is the only
+  difference: implementer `medium`, taste and spec and test `high`, docs `low`,
+  final `max`. One model across roles means the final review is not an
+  independent opinion; the effort ladder is the compensation, and a second
+  model is the fix once the account carries one. `tests/test_harness.sh`
+  compares each agent file against `models.json`, so the file is the one place
+  a model changes.
 - **The kit is the source for the playbooks and agents.** `/home/thelong/rig`
   owns `.rig/playbooks/` and `agents/`; `rig/sync.sh` renders them here. The
   rules, the two allowed differences, and `RIG_KIT` are in that script's header.
+- **Runtime verification is a skill, not a promise.** `skills/verify-app`
+  holds the feature map format (`verify/features.tsv`) and a Chrome DevTools
+  Protocol driver (`assets/drive.py`) that returns reached, measured, and a
+  screenshot, with exit 0 pass, 1 fail, 2 unreachable. Verified 2026-11-16
+  against a local fixture: two rows passed, a missing selector and a dead port
+  both exited 2, and the screenshot showed the rendered page. The driver needs
+  `websocket-client`; the venv is `~/.local/share/verify-app-venv`.
 - **The kit's pre-commit hook runs `sync.sh --check`.** Installed by
   `rig/sync.sh --install-hook`, it bakes the kit path in, refuses a commit while
   this copy is behind, and refuses one whose staged playbooks differ from the
