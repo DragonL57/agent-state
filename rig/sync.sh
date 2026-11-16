@@ -14,7 +14,6 @@
 # Usage:
 #   sync.sh           render the global copy from the kit
 #   sync.sh --check   render into a temp dir and diff; write nothing, exit 1 on
-#   sync.sh --check   render into a temp dir and diff; write nothing, exit 1 on
 #                     drift, so a kit edit that was not synced is caught
 #   sync.sh --install-hook
 #                     write a pre-commit hook in the kit that runs --check, so
@@ -25,7 +24,8 @@ set -euo pipefail
 
 kit="${RIG_KIT:-$HOME/rig}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-agents_dir="$(cd "$here/../agents" && pwd)"
+playbooks_dir="$here/playbooks"
+agents_dir="$(cd "$here/.." && pwd)/agents"
 check=0
 hook=0
 case "${1-}" in
@@ -40,28 +40,60 @@ if [ ! -d "$kit/.rig/playbooks" ] || [ ! -d "$kit/agents" ]; then
     exit 2
 fi
 
+# Only `.md` files are rendered, so anything else in the kit's two source
+# directories would be dropped without a word.
+for dir in "$kit/.rig/playbooks" "$kit/agents"; do
+    for path in "$dir"/*; do
+        [ -e "$path" ] || continue
+        case "$path" in
+            *.md) ;;
+            *) echo "sync: $path is not a .md file, and only .md files are rendered" >&2
+               exit 1 ;;
+        esac
+    done
+done
+
 # The hook is the only thing that runs --check without being asked, so it bakes
 # the kit path in: a commit from another shell must check the same kit.
 install_hook() {
-    local gitdir hook
-    if ! gitdir="$(git -C "$kit" rev-parse --absolute-git-dir 2>/dev/null)"; then
+    local hookdir hook tmp
+    if ! hookdir="$(git -C "$kit" rev-parse --path-format=absolute --git-path hooks 2>/dev/null)"; then
         echo "sync: $kit is not a git checkout, so there is no hook to install" >&2
         exit 2
     fi
-    hook="$gitdir/hooks/pre-commit"
+    hook="$hookdir/pre-commit"
     if [ -e "$hook" ] && ! grep -q 'installed by rig sync.sh' "$hook"; then
         echo "sync: $hook exists and is not mine, so it is untouched" >&2
         exit 1
     fi
-    mkdir -p "$gitdir/hooks"
+    mkdir -p "$hookdir"
+    # Written beside the target and moved in, so a failed write cannot leave a
+    # half hook that the next run refuses as foreign.
+    tmp="$hook.tmp"
     {
         echo '#!/bin/sh'
         echo '# installed by rig sync.sh --install-hook'
         echo '# Refuses a kit commit whose playbooks or agents were not rendered'
         echo '# into the global copy under ~/.pi/agent.'
-        printf 'exec env RIG_KIT=%s "%s/sync.sh" --check\n' "$kit" "$here"
-    } > "$hook"
-    chmod +x "$hook"
+        printf 'cd "%s" || exit 1\n' "$kit"
+        echo '# The render reads the working tree; a commit records the index. So a'
+        echo '# staged playbook that differs from the working tree ships text the'
+        echo '# install never saw. Unstaged edits are fine: the commit omits them.'
+        echo 'if [ -n "$(git diff --cached --name-only -- .rig/playbooks agents)" ] &&'
+        echo '    ! git diff --quiet -- .rig/playbooks agents; then'
+        echo '    echo "pre-commit: a staged playbook or agent differs from the working tree" >&2'
+        echo '    echo "pre-commit: the render read the working tree, which this commit does not record" >&2'
+        echo '    exit 1'
+        echo 'fi'
+        echo 'if [ -n "$(git ls-files --others --exclude-standard -- .rig/playbooks agents)" ]; then'
+        echo '    echo "pre-commit: the kit has playbooks or agents that this commit does not add" >&2'
+        echo '    echo "pre-commit: the install already has them, so add them before committing" >&2'
+        echo '    exit 1'
+        echo 'fi'
+        printf 'exec env RIG_KIT="%s" "%s/sync.sh" --check\n' "$kit" "$here"
+    } > "$tmp"
+    chmod +x "$tmp"
+    mv "$tmp" "$hook"
     echo "sync: installed $hook"
 }
 
@@ -70,11 +102,13 @@ if [ "$hook" = 1 ]; then
     exit 0
 fi
 
-# The second rule runs last because it puts a bare `AGENTS.md` back.
-render_agent() {
+# The repo-root rule has to run before the bare-reference rule, because the
+# bare rule would otherwise rewrite the repo-root rule's input. The guard below
+# catches a swap, which drops the repository's own contract.
+render() {
     sed -e 's#\.rig/playbooks/#~/.pi/agent/rig/playbooks/#g' \
+        -e 's#Read `AGENTS.md` in the repo root#Read `~/.pi/agent/AGENTS.md`, the global contract, plus any `AGENTS.md` in the repo root#g' \
         -e 's#Read `AGENTS.md`#Read `~/.pi/agent/AGENTS.md`#g' \
-        -e 's#Read `~/.pi/agent/AGENTS.md` in the repo root#Read `~/.pi/agent/AGENTS.md`, the global contract, plus any `AGENTS.md` in the repo root#g' \
         "$1"
 }
 
@@ -83,32 +117,43 @@ trap 'rm -rf "$out"' EXIT
 mkdir -p "$out/playbooks" "$out/agents"
 
 for src in "$kit"/.rig/playbooks/*.md; do
-    sed 's#\.rig/playbooks/#~/.pi/agent/rig/playbooks/#g' "$src" \
-        > "$out/playbooks/$(basename "$src")"
+    render "$src" > "$out/playbooks/$(basename "$src")"
 done
 for src in "$kit"/agents/*.md; do
-    render_agent "$src" > "$out/agents/$(basename "$src")"
+    render "$src" > "$out/agents/$(basename "$src")"
 done
 
 # A rule that stopped matching leaves a kit path or an unqualified contract
 # reference in the output, which would send an agent to a file that does not
 # exist here.
-if grep -rl '\.rig/playbooks/' "$out" > /dev/null; then
-    echo "sync: a playbook path survived the rewrite:" >&2
-    grep -rn '\.rig/playbooks/' "$out" >&2
-    exit 1
-fi
-if grep -rl 'Read `AGENTS.md`' "$out/agents" > /dev/null; then
-    echo "sync: an agent kept an unqualified contract reference:" >&2
-    grep -rn 'Read `AGENTS.md`' "$out/agents" >&2
-    exit 1
-fi
+fail_on_leftover() {
+    local pattern="$1" message="$2" hits
+    if hits="$(grep -rnF "$pattern" "$out")"; then
+        echo "sync: $message" >&2
+        printf '%s\n' "$hits" >&2
+        exit 1
+    fi
+}
+fail_on_leftover '.rig/playbooks/' 'a playbook path survived the rewrite:'
+fail_on_leftover 'Read `AGENTS.md`' 'an agent kept an unqualified contract reference:'
+fail_on_leftover 'Read `~/.pi/agent/AGENTS.md` in the repo root' \
+    'the contract rules ran out of order, so the repo contract was dropped:'
+
+# True when either destination holds something the render did not produce.
+drifted() {
+    local dst src pair
+    for pair in "playbooks:$playbooks_dir" "agents:$agents_dir"; do
+        dst="${pair#*:}"
+        src="$out/${pair%%:*}"
+        diff -ru "$dst" "$src" > /dev/null || return 0
+    done
+    return 1
+}
 
 if [ "$check" = 1 ]; then
-    drift=0
-    diff -ru "$here/playbooks" "$out/playbooks" || drift=1
-    diff -ru "$agents_dir" "$out/agents" || drift=1
-    if [ "$drift" = 1 ]; then
+    if drifted; then
+        diff -ru "$playbooks_dir" "$out/playbooks" || true
+        diff -ru "$agents_dir" "$out/agents" || true
         echo "sync: the global copy differs from the kit; run sync.sh to regenerate it" >&2
         exit 1
     fi
@@ -116,17 +161,42 @@ if [ "$check" = 1 ]; then
     exit 0
 fi
 
-# The kit is the whole content of both directories, so a file it no longer has
-# is stale here. Without this, --check reports an orphan that sync.sh cannot
-# clear.
-for dst in "$here/playbooks"/*.md "$agents_dir"/*.md; do
-    [ -e "$dst" ] || continue
-    case "$dst" in
-        "$here/playbooks/"*) [ -e "$out/playbooks/$(basename "$dst")" ] || rm -f "$dst" ;;
-        *)                   [ -e "$out/agents/$(basename "$dst")" ] || rm -f "$dst" ;;
-    esac
-done
+# The kit is the whole content of both directories, so anything it no longer
+# has is stale here. The prune matches what the diff compares: every entry, not
+# just `*.md`, or a stray file would block every commit and no run could clear
+# it.
+prune() {
+    local dst="$1" src="$2" path
+    mkdir -p "$dst"
+    for path in "$dst"/* "$dst"/.[!.]*; do
+        [ -e "$path" ] || continue
+        [ -e "$src/$(basename "$path")" ] && continue
+        echo "sync: removed $path, which the kit no longer has" >&2
+        rm -rf "$path"
+    done
+}
+prune "$playbooks_dir" "$out/playbooks"
+prune "$agents_dir" "$out/agents"
 
-cp "$out"/playbooks/*.md "$here/playbooks/"
+# Name every file this run replaces: a hand edit here dies silently otherwise.
+for path in "$out"/playbooks/*.md "$out"/agents/*.md; do
+    name="$(basename "$path")"
+    case "$path" in
+        */playbooks/*) dst="$playbooks_dir/$name" ;;
+        *) dst="$agents_dir/$name" ;;
+    esac
+    if [ -e "$dst" ] && ! cmp -s "$path" "$dst"; then
+        echo "sync: rewrote $dst"
+    fi
+done
+cp "$out"/playbooks/*.md "$playbooks_dir/"
 cp "$out"/agents/*.md "$agents_dir/"
+
+# Success means the copy now matches the kit, not that the copy ran.
+if drifted; then
+    echo "sync: the global copy still differs from the kit after writing:" >&2
+    diff -ru "$playbooks_dir" "$out/playbooks" >&2 || true
+    diff -ru "$agents_dir" "$out/agents" >&2 || true
+    exit 1
+fi
 echo "sync: wrote $(ls "$out/playbooks" | wc -l | tr -d ' ') playbooks and $(ls "$out/agents" | wc -l | tr -d ' ') agents from $kit"

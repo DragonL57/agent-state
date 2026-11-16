@@ -39,6 +39,16 @@ git clone https://github.com/DragonL57/pi-state.git ~/.pi/agent
 pi
 ```
 
+The playbooks and agents come from the Rig kit, which is a separate checkout. Clone it, then render this host's copy from it:
+
+```bash
+git clone https://github.com/DragonL57/rig.git ~/rig
+~/.pi/agent/rig/sync.sh
+~/.pi/agent/rig/sync.sh --install-hook
+```
+
+`sync.sh` reads `~/rig` unless `RIG_KIT` names another checkout. `--check` reports drift and writes nothing. `--install-hook` writes a pre-commit hook into that checkout. The hook refuses a kit commit while this host's copy is behind, and refuses one whose staged playbooks differ from the working tree the render read. Run it once per clone, because git does not track hooks.
+
 Authenticate providers separately on every host:
 
 ```text

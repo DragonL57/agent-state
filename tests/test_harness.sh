@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# Check the harness sync mechanism and the install's own budget setting.
+#
+# The kit's suite cannot reach `rig/sync.sh`, because the script lives here and
+# the kit does not ship it. Without this file the renderer, the drift detector,
+# the prune and the hook have no evidence behind them at all.
+set -uo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+pass=0
+fail=0
+block_failed=0
+ok() {
+    [ "$block_failed" -eq 0 ] && pass=$((pass + 1))
+    block_failed=0
+}
+bad() {
+    echo "FAIL: $1" >&2
+    fail=$((fail + 1))
+    block_failed=1
+}
+
+sandbox="$(mktemp -d)"
+trap 'rm -rf "$sandbox"' EXIT
+
+kit="$sandbox/kit with a space"
+install="$sandbox/install"
+mkdir -p "$kit/.rig/playbooks" "$kit/agents" "$install/rig/playbooks" "$install/agents"
+cp "$repo/rig/sync.sh" "$install/rig/sync.sh"
+printf 'Read `.rig/playbooks/design.md`.\n' > "$kit/.rig/playbooks/design.md"
+printf 'Read `AGENTS.md`.\n' > "$kit/agents/worker.md"
+
+sync() {
+    RIG_KIT="$kit" bash "$install/rig/sync.sh" "$@" 2>&1
+}
+
+# A clean render writes both files and rewrites the playbook path.
+out="$(sync)"
+[ $? -eq 0 ] || bad "a clean render exited non-zero: $out"
+[ -f "$install/rig/playbooks/design.md" ] || bad "the render did not write the playbook"
+[ -f "$install/agents/worker.md" ] || bad "the render did not write the agent"
+grep -q '~/.pi/agent/rig/playbooks/design.md' "$install/rig/playbooks/design.md" ||
+    bad "the render left the kit path in the playbook"
+grep -q '~/.pi/agent/AGENTS.md' "$install/agents/worker.md" ||
+    bad "the render left the contract reference unqualified"
+ok
+
+# A clean copy checks clean.
+out="$(sync --check)"
+[ $? -eq 0 ] || bad "--check called a clean copy drifted: $out"
+ok
+
+# A hand edit in the install is drift, and a plain run heals it.
+printf 'hand edited\n' >> "$install/rig/playbooks/design.md"
+out="$(sync --check)"
+[ $? -eq 1 ] || bad "--check missed a hand-edited playbook"
+sync > /dev/null
+out="$(sync --check)"
+[ $? -eq 0 ] || bad "--check still reported drift after a render: $out"
+ok
+
+# A file the kit no longer has is drift, and the render removes it out loud.
+printf 'stale\n' > "$install/agents/gone.md"
+out="$(sync --check)"
+[ $? -eq 1 ] || bad "--check missed an orphaned agent"
+out="$(sync)"
+[ -e "$install/agents/gone.md" ] && bad "the render left an orphaned agent"
+case "$out" in
+    *"removed $install/agents/gone.md"*) ;;
+    *) bad "the render removed an agent without saying so" ;;
+esac
+ok
+
+# A stray file that is not a playbook is still drift, and the render must be
+# able to clear it. Otherwise every commit is refused with advice that does
+# nothing.
+printf 'backup\n' > "$install/rig/playbooks/design.md~"
+out="$(sync --check)"
+[ $? -eq 1 ] || bad "--check missed a stray non-markdown file"
+sync > /dev/null
+[ -e "$install/rig/playbooks/design.md~" ] && bad "the render could not clear a stray file"
+out="$(sync --check)"
+[ $? -eq 0 ] || bad "--check still reported drift after clearing a stray file: $out"
+ok
+
+# A kit file that is not markdown would be dropped without a word.
+printf 'note\n' > "$kit/.rig/playbooks/notes.txt"
+out="$(sync)"
+[ $? -eq 1 ] || bad "a non-markdown kit file did not stop the render"
+rm -f "$kit/.rig/playbooks/notes.txt"
+ok
+
+# The hook refuses a foreign hook and a kit that is not a checkout.
+git -C "$kit" init -q
+printf '#!/bin/sh\necho mine\n' > "$kit/.git/hooks/pre-commit"
+out="$(sync --install-hook)"
+[ $? -eq 1 ] || bad "the hook installer overwrote a foreign hook"
+grep -q 'echo mine' "$kit/.git/hooks/pre-commit" ||
+    bad "the hook installer changed a foreign hook"
+rm -rf "$kit/.git"
+out="$(sync --install-hook)"
+[ $? -eq 2 ] || bad "the hook installer accepted a kit that is not a checkout"
+ok
+
+# The installed hook passes a clean tree, refuses a staged-then-edited one, and
+# refuses a playbook the commit leaves untracked. The render reads the working
+# tree, so the install matches it and the drift check alone would pass: only
+# these guards catch that the commit records text the install never saw.
+git -C "$kit" init -q
+git -C "$kit" add -A > /dev/null
+git -C "$kit" -c user.email=t@example.com -c user.name=t commit -qm base
+sync --install-hook > /dev/null
+out="$(cd "$kit" && bash .git/hooks/pre-commit 2>&1)"
+[ $? -eq 0 ] || bad "the hook refused a clean kit: $out"
+printf 'Read `.rig/playbooks/design.md` and more.\n' > "$kit/.rig/playbooks/design.md"
+git -C "$kit" add -A > /dev/null
+printf 'Read `.rig/playbooks/design.md` and more still.\n' > "$kit/.rig/playbooks/design.md"
+sync > /dev/null
+out="$(cd "$kit" && bash .git/hooks/pre-commit 2>&1)"
+[ $? -eq 1 ] || bad "the hook passed a commit whose staged content differs from the render"
+git -C "$kit" add -A > /dev/null
+git -C "$kit" -c user.email=t@example.com -c user.name=t commit -qm staged > /dev/null 2>&1
+printf 'Read `.rig/playbooks/design.md` and more again.\n' > "$kit/.rig/playbooks/new.md"
+sync > /dev/null
+out="$(cd "$kit" && bash .git/hooks/pre-commit 2>&1)"
+[ $? -eq 1 ] || bad "the hook passed a playbook the commit does not add"
+ok
+
+# The budget lives in this file alone, and 0 is the only value that leaves the
+# launch call in charge.
+[ -f "$repo/subagents.json" ] || bad "subagents.json is missing"
+default="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["defaultMaxTurns"])' \
+    "$repo/subagents.json" 2>/dev/null)"
+if [ -z "$default" ]; then
+    bad "could not read defaultMaxTurns from subagents.json"
+elif [ "$default" != "0" ]; then
+    bad "subagents.json defaultMaxTurns is '$default', which caps every agent"
+fi
+ok
+
+# No agent may pin a model here; this install inherits the session model.
+for file in "$repo"/agents/*.md; do
+    if grep -q '^model:' "$file"; then
+        bad "$(basename "$file") pins a model"
+    fi
+done
+ok
+
+echo "test_harness.sh: $pass passed, $fail failed"
+[ "$fail" -eq 0 ]
