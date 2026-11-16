@@ -8,6 +8,16 @@ being true.
 
 ## Open
 
+- **The brief is the only unreviewed artifact.** `AGENTS.md` line 15 tells the
+  session the user is the verified owner, and line 153 makes the main session
+  the only actor that talks to the user. When this install is driven by an
+  external orchestrator, that orchestrator holds the user role: its brief
+  arrives pre-approved and final. The five reviewers check the work against the
+  brief, not against what the real principal asked for, so a vague or wrong
+  brief is executed competently and passes review. Nothing in the harness
+  reviews the translation from intent to brief. Until an intake step exists
+  that writes the brief and a check that reads it back against the request,
+  every downstream verdict inherits that first step's error.
 - **Kit work: scale the reviewer set by risk.** `rig/playbooks/review.md` step 1
   gives every delegated change `spec-reviewer` and `taste-reviewer`. The cost is
   fixed and the risk is not, so a long run stalls on review it did not need.
