@@ -1,12 +1,12 @@
 # Review
 
-Use this playbook when you launch or brief reviewers and when you handle their findings. Reviewers inspect and report; you, the orchestrator, judge what to act on, and the plan's author defends the plan by default. Reviewers follow `~/.pi/agent/pandino/playbooks/reviewing.md`.
+Use this playbook when you launch or brief reviewers and when you handle their findings. Reviewers inspect and report; you, the orchestrator, judge what to act on, and the plan's author defends the plan by default. Reviewers follow `~/.pi/agent/rig/playbooks/reviewing.md`.
 
 Treat the steps as a checklist. When you skip a step, say why in one line of your reply.
 
 ## Steps
 
-1. **Choose the reviewers.** For substantial changes, run the relevant reviewers once near the end of a logical slice:
+1. **Choose the reviewers.** For substantial changes, run the reviewers `AGENTS.md` names as the default, once near the end of a logical slice, and add any this list calls for:
    - `taste-reviewer` and `spec-reviewer` when implementation or scope benefits from independent review;
    - `test-reviewer` when substantial behavior, tests, test infrastructure, or a shipping-code bug fix warrants evidence review;
    - `docs-reviewer` when substantial documented behavior or authority changes;
@@ -33,7 +33,7 @@ Budget: <turns>
 
 ## When a reviewer cannot run
 
-Use `fallback-runner` only when a reviewer cannot launch or complete because its provider, quota, session, or model is unavailable. Give it an explicit alternate model (omitting one silently inherits yours), the failed reviewer's agent definition verbatim, `~/.pi/agent/pandino/playbooks/reviewing.md`, and the brief. Pass the failed reviewer's turn budget explicitly in the launch call, since `fallback-runner` carries none of its own. Choose a model different from the writer's, and report every substitution to the user.
+Use `fallback-runner` only when a reviewer cannot launch or complete because its provider, quota, session, or model is unavailable. Give it an explicit alternate model (omitting one silently inherits yours), the failed reviewer's agent definition verbatim, `~/.pi/agent/rig/playbooks/reviewing.md`, and the brief. Pass the failed reviewer's turn budget explicitly in the launch call, since `fallback-runner` carries none of its own. Choose a model different from the writer's, and report every substitution to the user.
 
 ## Limits
 
