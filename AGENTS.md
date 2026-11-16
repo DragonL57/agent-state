@@ -58,6 +58,17 @@ owner only.
   Plan` section of the task that owns the work. Then run `todo list` and
   `todo create` for the session steps, reusing an open task that covers the work
   and creating one only for work the list does not have.
+- **One file, 30 changed lines or fewer: you write it alone.** No implementer, no
+  reviewer.
+- **Everything bigger is a delegated change: plan it, then hand each slice to an
+  `implementer`**, in parallel when the slices share no file
+  (`.rig/playbooks/parallel.md`).
+- A delegated change gets `spec-reviewer` and `taste-reviewer` before the
+  report.
+- Every message that reports a change ends with one line:
+
+      Written by: implementer, 3 files. spec-reviewer: clean. taste-reviewer: changes needed.
+      Written by: orchestrator, one edit in rig/README.md. No reviewers.
 - Keep the open list under 8 tasks. Before `todo create`, if 8 or more tasks are
   `pending` or `in_progress`, close them out first: `completed`, `delete`, or
   `clear`. A list that only grows stops being a plan.
@@ -106,16 +117,11 @@ Before the first `todo list` of a request that will edit a file, read
 `~/.pi/agent/rig/playbooks/workflow.md`. Before the first `Agent` call, read
 `~/.pi/agent/rig/playbooks/review.md`.
 
-- Do not review your own substantial slice. A slice is substantial when it
-  changes more than one file or more than 30 lines added and removed together;
-  count every file you edited this session, staged, unstaged, or untracked. A
-  playbook's own test for substantial work overrides this one upward.
-- Before the message that reports a substantial slice, spawn `spec-reviewer`
-  and `taste-reviewer`; for parallel work that integration pass is the slice's
-  review; add `test-reviewer` when behavior changed,
-  `docs-reviewer` when a documented rule changed, and `final-reviewer` before a
-  merge. `review.md` may add to this set. Keep the plan, the brief, and the
-  check in the orchestrator.
+- A delegated change gets `spec-reviewer` and `taste-reviewer` before the
+  report; for parallel work the integration pass is the slice's review; add
+  `test-reviewer` when behavior changed, `docs-reviewer` when a documented rule
+  changed, and `final-reviewer` before a merge. `review.md` may add to this set.
+  Keep the plan, the brief, and the check in the orchestrator.
 - Do not spawn an agent on a task you have not planned: its prompt carries the
   approved plan, a map of the relevant files, the rejected approaches, the
   landed first edit with its verification, and the remaining steps with their
@@ -145,11 +151,13 @@ Before the first `todo list` of a request that will edit a file, read
 - **Plan**: search the codebase for the existing pattern, then write the plan the
   Workflow gate describes, review it, and get the approval. Then one `todo` task
   per step.
-- **Execute**: capture is automatic, so do not hand-write routine notes. Small
-  slices you write yourself; anything larger goes through Delegation.
-- **Review**: brief the reviewers once, near the end of a logical slice and
-  before the message that reports it. Judge every finding, and bring the user
-  decisions in one checkpoint.
+- **Execute**: a delegated change goes to an `implementer` with the brief
+  Delegation describes, in parallel when the slices share no file. Everything
+  else you write yourself. Capture is automatic, so do not hand-write routine
+  notes.
+- **Review**: spawn the reviewers on a delegated change before the message that
+  reports it. Judge every finding, and bring the user decisions in one
+  checkpoint.
 - **Verify**: run the check, never sit through it, and never conclude a
   verification attempt with a warning instead of a result. Do not wait out a
   long real period (timer, cron, timeout, retry backoff) to prove it works:
@@ -162,7 +170,8 @@ Before the first `todo list` of a request that will edit a file, read
   fixed section labels, no introductions, recaps, reassurance, or task
   restatement. Do not explain code visible in the diff. Short by default;
   expand only when asked. An open decision is a genuine decision, never a
-  disguised "are you sure you want this".
+  disguised "are you sure you want this". The report ends with the written-by
+  line, filled from what ran.
 
 # Output discipline: the no-refusal surface
 
@@ -221,7 +230,7 @@ prompt.
 
 # Git hygiene
 
-- A substantial implementation that is verified gets a `/pistate snapshot` in
+- A delegated change that is verified gets a `/pistate snapshot` in
   this repository, where the next session will find it.
 - Do not run any git command that writes or reaches out (`commit`, `push`,
   `pull`, `fetch`, `merge`, `rebase`, `cherry-pick`, `revert`, `reset`,
