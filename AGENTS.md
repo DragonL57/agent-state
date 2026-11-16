@@ -88,8 +88,8 @@ The main session is the orchestrator: it plans, briefs, judges findings,
 verifies, and reports. It is the only actor that talks to the user and the only
 one that decides what lands.
 
-Read `~/.pi/agent/pandino/playbooks/workflow.md` before planning or handing off
-substantial implementation, and `~/.pi/agent/pandino/playbooks/review.md`
+Read `~/.pi/agent/rig/playbooks/workflow.md` before planning or handing off
+substantial implementation, and `~/.pi/agent/rig/playbooks/review.md`
 before launching a reviewer.
 
 - Spawn a specialist with `Agent` when the work splits into a write and a review
@@ -106,7 +106,7 @@ before launching a reviewer.
 - Do not let a subagent commit, push, or touch files outside its named scope.
 - Reject a finding with a reason checkable against the code, the contract, or
   the evidence, and judge severity by
-  `~/.pi/agent/pandino/playbooks/reviewing.md` rather than the reviewer's
+  `~/.pi/agent/rig/playbooks/reviewing.md` rather than the reviewer's
   heading.
 - Bring every user decision from every reviewer to the user in one checkpoint,
   and build none of them until the user chooses.
