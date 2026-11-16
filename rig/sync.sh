@@ -14,7 +14,11 @@
 # Usage:
 #   sync.sh           render the global copy from the kit
 #   sync.sh --check   render into a temp dir and diff; write nothing, exit 1 on
+#   sync.sh --check   render into a temp dir and diff; write nothing, exit 1 on
 #                     drift, so a kit edit that was not synced is caught
+#   sync.sh --install-hook
+#                     write a pre-commit hook in the kit that runs --check, so
+#                     the drift is caught at commit time instead of by memory
 #
 # The kit checkout is `$RIG_KIT`, default `$HOME/rig`.
 set -euo pipefail
@@ -23,15 +27,47 @@ kit="${RIG_KIT:-$HOME/rig}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 agents_dir="$(cd "$here/../agents" && pwd)"
 check=0
+hook=0
 case "${1-}" in
     "") ;;
     --check) check=1 ;;
-    *) echo "usage: sync.sh [--check]" >&2; exit 2 ;;
+    --install-hook) hook=1 ;;
+    *) echo "usage: sync.sh [--check | --install-hook]" >&2; exit 2 ;;
 esac
 
 if [ ! -d "$kit/.rig/playbooks" ] || [ ! -d "$kit/agents" ]; then
     echo "sync: no kit at $kit (set RIG_KIT to the checkout)" >&2
     exit 2
+fi
+
+# The hook is the only thing that runs --check without being asked, so it bakes
+# the kit path in: a commit from another shell must check the same kit.
+install_hook() {
+    local gitdir hook
+    if ! gitdir="$(git -C "$kit" rev-parse --absolute-git-dir 2>/dev/null)"; then
+        echo "sync: $kit is not a git checkout, so there is no hook to install" >&2
+        exit 2
+    fi
+    hook="$gitdir/hooks/pre-commit"
+    if [ -e "$hook" ] && ! grep -q 'installed by rig sync.sh' "$hook"; then
+        echo "sync: $hook exists and is not mine, so it is untouched" >&2
+        exit 1
+    fi
+    mkdir -p "$gitdir/hooks"
+    {
+        echo '#!/bin/sh'
+        echo '# installed by rig sync.sh --install-hook'
+        echo '# Refuses a kit commit whose playbooks or agents were not rendered'
+        echo '# into the global copy under ~/.pi/agent.'
+        printf 'exec env RIG_KIT=%s "%s/sync.sh" --check\n' "$kit" "$here"
+    } > "$hook"
+    chmod +x "$hook"
+    echo "sync: installed $hook"
+}
+
+if [ "$hook" = 1 ]; then
+    install_hook
+    exit 0
 fi
 
 # The second rule runs last because it puts a bare `AGENTS.md` back.

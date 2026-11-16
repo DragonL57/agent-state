@@ -20,6 +20,10 @@ Nothing.
 - **The kit is the source for the playbooks and agents.** `/home/thelong/rig`
   owns `.rig/playbooks/` and `agents/`; `rig/sync.sh` renders them here. The
   rules, the two allowed differences, and `RIG_KIT` are in that script's header.
+- **The kit's pre-commit hook runs `sync.sh --check`.** Installed by
+  `rig/sync.sh --install-hook`, it bakes the kit path in and refuses a commit
+  while the global copy is behind. It refuses to overwrite a hook it did not
+  write.
 - **The launch call is the only turn budget.** No agent pins `max_turns`, and
   `subagents.json` sets `defaultMaxTurns: 0`, because the runner resolves
   `explicit ?? agent ?? default` and a nonzero default would cap the
@@ -28,8 +32,8 @@ Nothing.
 
 ## Waiting
 
-- The kit change is uncommitted in `/home/thelong/rig`: 16 files, fork-only,
-  expected to conflict on rebase. Commit it on request.
+- This batch is uncommitted in both trees: the hook and the `.rig/` paths in
+  the kit's four specs, and the `--install-hook` note here. Commit on request.
 
 ## Not here
 

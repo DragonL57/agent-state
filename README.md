@@ -10,7 +10,7 @@ Managed with [@moejay/pi-state-sync](https://github.com/moejay/pi-state-sync).
 - Extensions, skills, prompts, and themes, for the hosts that have them
 - Context and system prompt files
 - Pending harness work, in `HARNESS.md`
-- The playbooks in `rig/playbooks/` and the agents in `agents/`, rendered from the Rig kit by `rig/sync.sh`. Edit them in the kit, then run `rig/sync.sh`; `rig/sync.sh --check` reports drift.
+- The playbooks in `rig/playbooks/` and the agents in `agents/`, rendered from the Rig kit by `rig/sync.sh`. Edit them in the kit, then run `rig/sync.sh`; `rig/sync.sh --check` reports drift, and `rig/sync.sh --install-hook` puts that check in the kit's pre-commit hook.
 
 Host-local credentials, trust decisions, sessions, and package caches are intentionally ignored. Generated runtime state is tracked: the MCP caches and onboarding flags, `pi-web-session-index.json`, the model catalogs, and `pi-permissions.jsonc`.
 
