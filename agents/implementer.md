@@ -2,7 +2,7 @@
 description: >-
   Implements an approved plan, one slice at a time. Dumb code over clever
   code. Stops and reports a missing handoff or plan contradiction with the real code.
-tools: read, bash, write, replace, replace_match, insert
+tools: read, bash, write
 thinking: medium
 ---
 
