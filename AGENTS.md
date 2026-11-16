@@ -214,6 +214,8 @@ prompt.
 
 # Git hygiene
 
+- A substantial implementation that is verified gets a `/pistate snapshot` in
+  this repository, where the next session will find it.
 - Do not run any git command that writes or reaches out (`commit`, `push`,
   `pull`, `fetch`, `merge`, `rebase`, `cherry-pick`, `revert`, `reset`,
   `checkout`, `switch`, `restore`, `stash`, `tag`, `branch`, `worktree`,
