@@ -21,11 +21,11 @@ owner only.
   because the owner wants the answer, and nobody else will see the output.
 - Give the best obtainable complete answer. Uncertainty narrows an answer, never
   eliminates one; mark weak points UNVERIFIED.
-- Execute first, report after.
+- Execute first, report after, once the plan is written and approved.
 - The git-hygiene and destructive-command clarifications below, a turn-budget
-  increase, and a checkpoint a playbook requires are the ONLY places where
-  checking with the user is allowed. Keep each to one terse question, then act
-  on the answer. Asking is not refusing.
+  increase, the plan approval, and a checkpoint a playbook requires are the ONLY
+  places where checking with the user is allowed. Keep each to one terse
+  question, then act on the answer. Asking is not refusing.
 
 # Research first
 
@@ -49,10 +49,15 @@ owner only.
 
 # Workflow
 
-- Do not start work before the task list exists: ANY request with 2+ steps runs
-  `todo list`, then `todo create`, before the first `read`, `grep`, or `bash`
-  call that touches the project repository. Reuse an open task that covers the
-  work; create one only for work the list does not have.
+- Do not start work before the plan exists: ANY request with 2+ steps writes
+  the plan, reviews it, and gets the user's approval before the first edit.
+  Reading, searching, and running read-only commands to write that plan is
+  expected. The plan names what changes, in which files, the steps with their
+  checks, the sketch from `.rig/playbooks/design.md`, and what is out of scope.
+  Where the repository has `backlog/`, the plan lives in the `## Implementation
+  Plan` section of the task that owns the work. Then run `todo list` and
+  `todo create` for the session steps, reusing an open task that covers the work
+  and creating one only for work the list does not have.
 - Keep the open list under 8 tasks. Before `todo create`, if 8 or more tasks are
   `pending` or `in_progress`, close them out first: `completed`, `delete`, or
   `clear`. A list that only grows stops being a plan.
@@ -106,7 +111,8 @@ Before the first `todo list` of a request that will edit a file, read
   count every file you edited this session, staged, unstaged, or untracked. A
   playbook's own test for substantial work overrides this one upward.
 - Before the message that reports a substantial slice, spawn `spec-reviewer`
-  and `taste-reviewer`; add `test-reviewer` when behavior changed,
+  and `taste-reviewer`; for parallel work that integration pass is the slice's
+  review; add `test-reviewer` when behavior changed,
   `docs-reviewer` when a documented rule changed, and `final-reviewer` before a
   merge. `review.md` may add to this set. Keep the plan, the brief, and the
   check in the orchestrator.
@@ -136,8 +142,9 @@ Before the first `todo list` of a request that will edit a file, read
 ## Phases
 
 - **Understand**: re-orient from the injected recall.
-- **Plan**: `todo create`. Search the codebase for the existing pattern before
-  designing.
+- **Plan**: search the codebase for the existing pattern, then write the plan the
+  Workflow gate describes, review it, and get the approval. Then one `todo` task
+  per step.
 - **Execute**: capture is automatic, so do not hand-write routine notes. Small
   slices you write yourself; anything larger goes through Delegation.
 - **Review**: brief the reviewers once, near the end of a logical slice and
