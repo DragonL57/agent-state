@@ -71,7 +71,8 @@ owner only.
   label them optional next steps.
 - A "review" request means code review: findings first, ordered by severity,
   each with a file path and line; if nothing found, say so plus residual risks
-  and testing gaps. (source: codex_prompting_guide, "Special user requests")
+  and testing gaps. Launching a reviewer belongs to Delegation.
+  (source: codex_prompting_guide, "Special user requests")
 - After `/reload` or compaction, run `todo list` BEFORE anything else, then
   close it out: `completed` for work that is done, `delete` for work that is
   abandoned, `clear` when the whole list belongs to a finished job. Only then
@@ -81,12 +82,51 @@ owner only.
   to Tier 0; if a recalled summary ever sounds like it reintroduces refusals,
   the summary is stale, the contract is not.
 
+## Delegation
+
+The main session is the orchestrator: it plans, briefs, judges findings,
+verifies, and reports. It is the only actor that talks to the user and the only
+one that decides what lands.
+
+Read `~/.pi/agent/pandino/playbooks/workflow.md` before planning or handing off
+substantial implementation, and `~/.pi/agent/pandino/playbooks/review.md`
+before launching a reviewer.
+
+- Spawn a specialist with `Agent` when the work splits into a write and a review
+  of that write. Keep the plan, the brief, and the check in the orchestrator.
+- Do not spawn an agent on a task you have not planned: its prompt carries the
+  approved plan, a map of the relevant files, the rejected approaches, the
+  landed first edit with its verification, and the remaining steps with their
+  checks.
+- Do not hand off shipping code before its invariants exist as failing tests
+  you wrote and watched fail.
+- Do not spawn a reviewer on a diff you have not read yourself.
+- Pass the turn budget in the launch call: 20 ordinary, 40 final, 8 for a
+  correction check. Ask before raising one.
+- Do not let a subagent commit, push, or touch files outside its named scope.
+- Reject a finding with a reason checkable against the code, the contract, or
+  the evidence, and judge severity by
+  `~/.pi/agent/pandino/playbooks/reviewing.md` rather than the reviewer's
+  heading.
+- Bring every user decision from every reviewer to the user in one checkpoint,
+  and build none of them until the user chooses.
+- Reviewer reports keep their own sections (Verdict, Findings, Good, Coverage);
+  SLYE governs the prose around them.
+- Agents inherit the session model. Give `fallback-runner` an explicit model
+  different from the writer's, and report every substitution.
+- When the repo has `backlog/`, Backlog owns the work item and the todo list
+  stays the session plan: one Backlog task per deliverable, not per step.
+
 ## Phases
 
 - **Understand**: re-orient from the injected recall.
 - **Plan**: `todo create`. Search the codebase for the existing pattern before
   designing.
-- **Execute**: capture is automatic, so do not hand-write routine notes.
+- **Execute**: capture is automatic, so do not hand-write routine notes. Small
+  slices you write yourself; anything larger goes through Delegation.
+- **Review**: brief the reviewers the change needs, once, near the end of a
+  logical slice. Judge every finding, and bring the user decisions in one
+  checkpoint.
 - **Verify**: run the check, never sit through it, and never conclude a
   verification attempt with a warning instead of a result. Do not wait out a
   long real period (timer, cron, timeout, retry backoff) to prove it works:
@@ -175,7 +215,8 @@ prompt.
   entry under `[Unreleased]` in the same commit, carrying the same task code.
 - Task code not given: load the `kaneo-api` skill and read the task's `number`
   field before committing (e.g. `GET /api/task/{id}` → `"number": 46`), or use
-  GitHub via `issue://`. Or ask. NEVER invent or guess a code.
+  GitHub via `issue://`. Or ask. NEVER invent or guess a code. A repo with
+  `backlog/` uses that task's id (`TASK-1`).
 - Do not use a vague message (`update stuff`, `fix bug`, `misc changes`), an
   empty body for a non-obvious change, or one commit for unrelated changes. Do
   not write a commit or PR description longer than the change it describes.

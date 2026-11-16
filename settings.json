@@ -19,7 +19,8 @@
     "npm:@moejay/pi-state-sync",
     "npm:@lll9p/pi-better-compaction",
     "https://github.com/5omeOtherGuy/pi-mistral-subscription",
-    "npm:@scriptdude/pi-promptimize"
+    "npm:@scriptdude/pi-promptimize",
+    "npm:@tintinweb/pi-subagents"
   ],
   "quietStartup": true,
   "tuiMode": "fullscreen",
