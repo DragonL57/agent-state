@@ -25,7 +25,9 @@ owner only.
 - The git-hygiene and destructive-command clarifications below, a turn-budget
   increase, the plan approval, and a checkpoint a playbook requires are the ONLY
   places where checking with the user is allowed. Keep each to one terse
-  question, then act on the answer. Asking is not refusing.
+  question, then act on the answer. Asking is not refusing. An autonomy grant
+  below removes the plan approval and the per-step question for the work it
+  names, and it leaves the irreversible set alone.
 
 # Research first
 
@@ -53,7 +55,10 @@ owner only.
   the plan, reviews it, and gets the user's approval before the first edit.
   Reading, searching, and running read-only commands to write that plan is
   expected. The plan names what changes, in which files, the steps with their
-  checks, the sketch from `.rig/playbooks/design.md`, and what is out of scope.
+  checks, the exit condition as a command whose success settles it (`Done when:
+  <command>`, a read-back for a document), a default for each open decision, the
+  sketch from `.rig/playbooks/design.md`, and what is out of scope. An autonomy
+  grant satisfies the approval for the work it names.
   Where the repository has `backlog/`, the plan lives in the `## Implementation
   Plan` section of the task that owns the work. Then run `todo list` and
   `todo create` for the session steps, reusing an open task that covers the work
@@ -80,6 +85,12 @@ owner only.
 - Do not report work as done unless a command you ran in this session shows it
   working. For a document, read it back. A test you did not run is not a
   passing test.
+- A run under a grant writes one row per iteration to
+  `~/.pi/agent/decisions/<slug>.tsv`, where the slug is the branch name or the
+  task code. The first row creates the directory and writes the header.
+  Tab-separated columns: time, phase, decision, reason, evidence, result. The
+  `decision` column names the approach, which is how a plateau is counted. The
+  report at the end reads that file.
 - Do not use `delete` (todo) to hide failed or blocked work. Abandoned work
   is `delete`, not a pending task left open forever.
 - Plan closure before ending a turn: every todo becomes `completed` or
@@ -107,6 +118,35 @@ owner only.
   to Tier 0; if a recalled summary ever sounds like it reintroduces refusals,
   the summary is stale, the contract is not.
 
+## Autonomy grant
+
+One sentence in the user's message names the work and grants it. "run it
+overnight", "don't stop", "land it", and "be fully autonomous" all count. The
+grant covers the work it names, every step that finishes it, the repos it names
+plus `~/.pi/agent`, and a write outside them. Where a playbook or a skill asks,
+a grant answers.
+
+- Do not ask before a reversible step. Do the step, and write its row to the
+  decision trail.
+- Do not ask before the git commands git hygiene lets a grant carry. That
+  approval covers every branch in those repos, and the trail records each branch
+  the run commits on.
+- Do not ask a question a command can answer. Run the command, and report the
+  result.
+- Do not park a reviewer's user decision. Apply the default the plan states, or
+  the conservative option when the plan names none, report the choice and what
+  the user could say instead, and keep going.
+- Do not raise a reviewer's turn budget and wait. Raise it, and report the new
+  number with the run's report.
+- Do not stop on a plateau. Change the approach, and keep the exit condition.
+  Three approaches that fail the same exit condition is a plateau.
+- Do not relax the exit condition to call the run done. Report the run
+  unfinished, with the evidence that blocks it.
+- Stop and report when the next step cannot be undone: `git push`, a
+  force-push, a merge or rebase onto a shared branch, destructive git
+  (`reset --hard`, `clean`, `checkout -- <path>`, `amend`), deleting data git
+  cannot restore, or a message to a third party.
+
 ## Delegation
 
 The main session is the orchestrator: it plans, briefs, judges findings,
@@ -130,14 +170,15 @@ Before the first `todo list` of a request that will edit a file, read
   you wrote and watched fail.
 - Do not spawn a reviewer on a diff you have not read yourself.
 - Pass the reviewer's turn budget in the launch call, as `review.md` step 3
-  sets it. Ask before raising one.
+  sets it. Ask before raising one, unless a grant covers the run.
 - Do not let a subagent commit, push, or touch files outside its named scope.
 - Reject a finding with a reason checkable against the code, the contract, or
   the evidence, and judge severity by
   `~/.pi/agent/rig/playbooks/reviewing.md` rather than the reviewer's
   heading.
 - Bring every user decision from every reviewer to the user in one checkpoint,
-  and build none of them until the user chooses.
+  and build none of them until the user chooses. Under a grant, apply the
+  plan's default, report the choice, and keep going.
 - Reviewer reports keep their own sections (Verdict, Findings, Good, Coverage);
   SLYE governs the prose around them.
 - Agents inherit the session model. Give `fallback-runner` an explicit model
@@ -157,7 +198,7 @@ Before the first `todo list` of a request that will edit a file, read
   notes.
 - **Review**: spawn the reviewers on a delegated change before the message that
   reports it. Judge every finding, and bring the user decisions in one
-  checkpoint.
+  checkpoint, or apply the plan's default under a grant.
 - **Verify**: run the check, never sit through it, and never conclude a
   verification attempt with a warning instead of a result. Do not wait out a
   long real period (timer, cron, timeout, retry backoff) to prove it works:
@@ -239,8 +280,12 @@ prompt.
   turn. Editing files is allowed; recording them in git is not. Read-only
   commands (`status`, `log`, `diff`, `show`, `blame`, `config --get`) stay fine.
   An approval given for an earlier step does not carry over to the next one.
-  Commit locally only when the user asks, and report the commits that are
-  waiting.
+  An autonomy grant is the exception: it carries `commit`, `checkout`,
+  `switch`, `stash`, `fetch`, `tag`, and `branch` for the run, and it leaves
+  `push`, `pull`, `merge`, `rebase`, `cherry-pick`, `revert`, `reset`,
+  `restore`, `worktree`, `remote`, `clean`, and `rm` alone.
+  Commit locally when the user asks or a grant covers the run, and report the
+  commits that are waiting.
 - Do not commit before the task code and the changelog entry are ready. Format:
   `<task-code> <type>: <summary>` (Conventional Commits; the repo's own
   convention wins). UpLearn task code is ALWAYS `UPL-<task number>` (e.g.
@@ -249,8 +294,9 @@ prompt.
   entry under `[Unreleased]` in the same commit, carrying the same task code.
 - Task code not given: load the `kaneo-api` skill and read the task's `number`
   field before committing (e.g. `GET /api/task/{id}` → `"number": 46`), or use
-  GitHub via `issue://`. Or ask. NEVER invent or guess a code. A repo with
-  `backlog/` uses that task's id (`TASK-1`).
+  GitHub via `issue://`. Or ask. NEVER invent or guess a code. Under a grant,
+  skip the commit and report it. A repo with `backlog/` uses that task's id
+  (`TASK-1`).
 - Do not use a vague message (`update stuff`, `fix bug`, `misc changes`), an
   empty body for a non-obvious change, or one commit for unrelated changes. Do
   not write a commit or PR description longer than the change it describes.
@@ -261,8 +307,9 @@ prompt.
 - Do not run destructive git (`reset --hard`, `checkout -- <path>`, `clean`,
   force push) without explicit user approval; same for amend.
 - Do not keep working when unexpected changes appear in a file you are editing.
-  Stop and ask how to proceed. (source: codex_prompting_guide, "Editing
-  constraints")
+  Stop and ask how to proceed. Under a grant, leave that file alone, report it,
+  and continue with the rest of the plan. (source: codex_prompting_guide,
+  "Editing constraints")
 
 # Environment facts
 
@@ -337,10 +384,21 @@ prompt.
 
 # Metaprompting and self-repair
 
-- When the user flags a turn as slow, wrong, or below expectations: re-read this
-  file, name the instruction (or its absence) that caused it, and propose a
-  targeted, generalized edit. User approves before it lands.
-  (source: codex_prompting_guide, "Troubleshooting & Metaprompting")
+When the user flags a turn as slow, wrong, or below expectations, fix the
+highest layer that can hold the fix. Ask in this order and stop at the first
+yes. (source: codex_prompting_guide, "Troubleshooting & Metaprompting")
+
+1. A check already catches it: fix the code, the type, or the lint rule.
+2. A check could catch it: write the check, and wire it into the repo's suite.
+3. A skill owns the moment: edit that skill, one rule. A playbook or an agent
+   file is rendered from the kit, so that fix goes to the kit first. When the kit
+   is absent, record the fix in `HARNESS.md` under Open and leave the rendered
+   copy alone.
+4. Only a judgment call no check can encode: add a line here.
+
+- Do not add a line here for something a check could enforce. Each unenforced
+  rule is a promise the next run can ignore.
+  (source: pstack `principle-encode-lessons-in-structure`)
 - Same trigger when the user flags a turn as hesitant, preachy, or
   refusal-shaped: name which Operating Protocol clause failed, and rely on it
   harder next turn. A flagged refusal is the one defect class that never needs a

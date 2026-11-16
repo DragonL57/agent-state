@@ -146,5 +146,36 @@ for file in "$repo"/agents/*.md; do
 done
 ok
 
+# The contract's autonomy rules are load-bearing. A grant is what lets a run
+# finish without a checkpoint per step, and the exit condition is what tells it
+# when to stop. A later edit that drops either one leaves no trace, so check the
+# names here.
+contract="$repo/AGENTS.md"
+[ -f "$contract" ] || bad "AGENTS.md is missing"
+grant="$(sed -n '/^## Autonomy grant$/,/^## /p' "$contract")"
+[ -n "$grant" ] || bad "AGENTS.md lost its Autonomy grant section"
+grep -q 'Done when:' "$contract" ||
+    bad "AGENTS.md no longer requires an exit condition in the plan"
+grep -q 'decisions/<slug>.tsv' "$contract" ||
+    bad "AGENTS.md lost the decision-trail convention"
+grep -q 'reset --hard' <<< "$grant" ||
+    bad "the grant no longer names the irreversible set"
+grep -q 'reviewer' <<< "$grant" ||
+    bad "the grant no longer covers a reviewer's user decision"
+ok
+
+# Every grant rule is a constraint, not advice. The evidence on rule polarity
+# finds positive directives harmful and negative constraints helpful, so a
+# bullet here that reads as advice is a defect rather than a style choice. A
+# stop rule is a constraint too, so it is allowed beside the negatives.
+while IFS= read -r line; do
+    case "$line" in
+        '- Do not '*) ;;
+        '- Stop and report '*) ;;
+        '- '*) bad "the grant has a rule that reads as advice: $line" ;;
+    esac
+done <<< "$grant"
+ok
+
 echo "test_harness.sh: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
