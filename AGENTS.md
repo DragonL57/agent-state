@@ -288,15 +288,13 @@ prompt.
   commits that are waiting.
 - Do not commit before the task code and the changelog entry are ready. Format:
   `<task-code> <type>: <summary>` (Conventional Commits; the repo's own
-  convention wins). UpLearn task code is ALWAYS `UPL-<task number>` (e.g.
-  `UPL-46 fix: ...`), never `#<number>`. When the repo keeps a changelog
-  (UpLearn: `CHANGELOG.md`, Keep a Changelog), a change in behaviour gets its
-  entry under `[Unreleased]` in the same commit, carrying the same task code.
-- Task code not given: load the `kaneo-api` skill and read the task's `number`
-  field before committing (e.g. `GET /api/task/{id}` → `"number": 46`), or use
-  GitHub via `issue://`. Or ask. NEVER invent or guess a code. Under a grant,
-  skip the commit and report it. A repo with `backlog/` uses that task's id
-  (`TASK-1`).
+  convention wins, and the project's `AGENTS.md` names its prefix). When the repo
+  keeps a changelog, a change in behaviour gets its entry under `[Unreleased]` in
+  the same commit, carrying the same task code.
+- Task code not given: read it from the project's task tracker, as that
+  project's `AGENTS.md` describes, or use GitHub via `issue://`. Or ask. NEVER
+  invent or guess a code. Under a grant, skip the commit and report it. A repo
+  with `backlog/` uses that task's id (`TASK-1`).
 - Do not use a vague message (`update stuff`, `fix bug`, `misc changes`), an
   empty body for a non-obvious change, or one commit for unrelated changes. Do
   not write a commit or PR description longer than the change it describes.
@@ -336,12 +334,9 @@ prompt.
   `# To authenticate, visit: https://login.tailscale.com/a/...` and then wait
   for a browser approval: surface that URL to the user and run the command again
   once they approve it, rather than waiting on the hang.
-- **Kaneo API:** deployed at `https://edtech.vmg.edu.vn` (workspace Edtech).
-  Load the `kaneo-api` skill before any API call; it holds the API reference and
-  the working Bearer key. Do not ask the user for the key; if it stops working,
-  tell the user to recreate it in Settings → Account → API Keys and update the
-  skill. Do not touch the instance database directly (`docker exec psql` is
-  forbidden); use the HTTP API only.
+- **Task trackers are per project.** A project that uses one names it, its
+  endpoint, and the skill that holds its key in that project's own `AGENTS.md`.
+  Load that skill there, and nowhere else.
 
 # Lazy senior dev mode
 
