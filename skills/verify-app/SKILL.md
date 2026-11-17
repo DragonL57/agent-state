@@ -12,7 +12,7 @@ Two artifacts, both project-local:
 - **The feature map**, `verify/features.tsv`, one row per user-visible feature: the name a person would say, the URL or command that reaches it, the selector that proves it is there, and the check that proves it works.
 - **The driver**, `verify/drive.py`, which turns one row into a JSON result: reached, measured, screenshot path.
 
-The map is the shared vocabulary the talk calls a feature map. "The thingy in the left sidebar" resolves to a row, so a reviewer and the implementer name the same feature.
+The map is the shared vocabulary: "The thingy in the left sidebar" resolves to a row, so a reviewer and the implementer name the same feature.
 
 ## Steps
 
@@ -40,7 +40,7 @@ launch-time	/	[data-testid=app-root]	perf:domContentLoaded<2500
 
 - `text:<string>`: the page contains this text.
 - `count>=<n>`: the selector matches at least n elements.
-- `perf:<metric><<ms>`: a Performance API metric is under the bound, which is the talk's startup-time case.
+- `perf:<metric><<ms>`: a Performance API metric is under the bound, which is the startup-time case.
 - `attr:<selector>@<name>=<value>`: an attribute holds a value.
 
 Anything the driver cannot express belongs in a project test, not in this file. The map stays small enough to read.
@@ -50,7 +50,7 @@ Anything the driver cannot express belongs in a project test, not in this file. 
 Copy `verify/drive.py` from this skill's `assets/` into the repository, then edit only `BROWSER_CMD` if the project's browser differs. It uses the Chrome DevTools Protocol over a websocket, so it needs no Playwright dependency and no second browser stack in the repo.
 
 ```bash
-mkdir -p verify && cp ~/.pi/agent/skills/verify-app/assets/drive.py verify/drive.py
+mkdir -p verify && cp <this-skill-directory>/assets/drive.py verify/drive.py
 printf '# name\tpath\tready_selector\tcheck\n' > verify/features.tsv
 ```
 

@@ -57,23 +57,23 @@ owner only.
   expected. The plan names what changes, in which files, the steps with their
   checks, the exit condition as a command whose success settles it (`Done when:
   <command>`, a read-back for a document), a default for each open decision, the
-  sketch from `.rig/playbooks/design.md`, and what is out of scope. An autonomy
-  grant satisfies the approval for the work it names.
+  sketch from `~/.pi/agent/rig/playbooks/design.md`, and what is out of scope.
+  An autonomy grant satisfies the approval for the work it names.
   Where the repository has `backlog/`, the plan lives in the `## Implementation
   Plan` section of the task that owns the work. Then run `todo list` and
   `todo create` for the session steps, reusing an open task that covers the work
   and creating one only for work the list does not have.
 - **One file, 30 changed lines or fewer: you write it alone.** No implementer, no
-  reviewer.
+  reviewer. Report it as the single-file exemption.
 - **Everything bigger is a delegated change: plan it, then hand each slice to an
   `implementer`**, in parallel when the slices share no file
-  (`.rig/playbooks/parallel.md`).
+  (`~/.pi/agent/rig/playbooks/parallel.md`).
 - A delegated change gets `spec-reviewer` and `taste-reviewer` before the
-  report.
-- Every message that reports a change ends with one line:
+  report. Both are mandatory.
+- Every message that reports a change ends with one line naming each reviewer and its verdict:
 
       Written by: implementer, 3 files. spec-reviewer: clean. taste-reviewer: changes needed.
-      Written by: orchestrator, one edit in rig/README.md. No reviewers.
+      Written by: orchestrator, one file, 24 changed lines. spec-reviewer: not run, single-file exemption.
 - Keep the open list under 8 tasks. Before `todo create`, if 8 or more tasks are
   `pending` or `in_progress`, close them out first: `completed`, `delete`, or
   `clear`. A list that only grows stops being a plan.
@@ -161,6 +161,8 @@ Before the first `todo list` of a request that will edit a file, read
   report; for parallel work the integration pass is the slice's review; add
   `test-reviewer` when behavior changed, `docs-reviewer` when a documented rule
   changed, and `final-reviewer` before a merge. `review.md` may add to this set.
+  The orchestrator never reviews its own change in place of them, and
+  never asks the user whether to review.
   Keep the plan, the brief, and the check in the orchestrator.
 - Do not spawn an agent on a task you have not planned: its prompt carries the
   approved plan, a map of the relevant files, the rejected approaches, the
@@ -359,8 +361,16 @@ prompt.
   size; pick the edge-case-correct one.
 - Do not cut a real corner silently: mark a deliberate simplification with a
   `note:` comment naming the ceiling and the upgrade path.
-- Do not skip design-rationale comments; they are documentation that prevents
-  future bugs.
+- Write a comment only for a constraint imposed by something outside our
+  control (dependency, platform, protocol), linked when possible; for an
+  accepted scale limit of a simple implementation; or for a license. The
+  product reason behind a threshold or domain rule belongs in the
+  specification. Docstrings follow the same rule; a project that needs them
+  says so below the project marker.
+- Treat a comment that justifies a workaround in our own code, and a lint or
+  type-check suppression, as a red flag: fix the root cause even when that
+  costs more. When the cause lies outside the current work, report it to the
+  user.
 - Do not ship non-trivial logic without ONE runnable check: an assert-based
   demo/self-check or one small test file. No frameworks, no fixtures.
 - Do not be lazy about: understanding the problem, input validation at trust

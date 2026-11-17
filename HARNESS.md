@@ -18,28 +18,19 @@ being true.
   reviews the translation from intent to brief. Until an intake step exists
   that writes the brief and a check that reads it back against the request,
   every downstream verdict inherits that first step's error.
-- **Kit work: scale the reviewer set by risk.** `rig/playbooks/review.md` step 1
-  gives every delegated change `spec-reviewer` and `taste-reviewer`. The cost is
-  fixed and the risk is not, so a long run stalls on review it did not need.
-  Land in the kit: a full set at the code-ready head, one verifier at a new head
-  after a rebase or a conflict resolution, none for wording, and a restack whose
-  `git patch-id` is unchanged keeps its verdict. The kit checkout is absent on
-  this host, so this cannot be rendered here.
 - **Kit work: `review.md` still mandates the asks the grant removes.** Step 3
   says "ask the user" before raising a reviewer's budget, and step 4 says build
   no reviewer user decision until the user chooses. `AGENTS.md` now answers both
   under a grant, and the grant's "where a playbook or a skill asks, a grant
   answers" line settles the precedence. The kit copy still reads as binding, so
   land the matching clause there and re-render.
-- **Kit work: the kit checkout is now present.** `/home/thelong/rig` is cloned
-  at `8e6a8c3` and `rig/sync.sh --check` reports up to date, so the two items
-  first two items can be landed upstream and re-rendered instead of waiting.
-- **Kit work: `verify-app` belongs upstream.** The skill lives in this install
-  and is not in the kit, so a fresh clone loses it. Move it to
-  `rig/.agents/skills/` or a kit-owned skill directory, then re-render.
 
 ## Settled
 
+- **The reviewer pair is mandatory; risk scales only the extras.** Every
+  delegated change gets `spec-reviewer` and `taste-reviewer`, and risk decides
+  only the reviewers added on top: `test-reviewer`, `docs-reviewer`,
+  `uiux-reviewer`, and `final-reviewer`.
 - **`fallback-runner` stays unpinned.** Its caller supplies an explicit model,
   because a fallback that inherits the writer's model is not a fallback. It is
   the only agent under `agents/` without a `model:` line, and the test enforces
@@ -57,12 +48,16 @@ being true.
 - **The kit is the source for the playbooks and agents.** `/home/thelong/rig`
   owns `.rig/playbooks/` and `agents/`; `rig/sync.sh` renders them here. The
   rules, the two allowed differences, and `RIG_KIT` are in that script's header.
-- **Runtime verification is a skill, not a promise.** `skills/verify-app`
-  holds the feature map format (`verify/features.tsv`) and a Chrome DevTools
-  Protocol driver (`assets/drive.py`) that returns reached, measured, and a
-  screenshot, with exit 0 pass, 1 fail, 2 unreachable. Verified 2026-11-16
-  against a local fixture: two rows passed, a missing selector and a dead port
-  both exited 2, and the screenshot showed the rendered page. The driver needs
+- **The kit owns `verify-app`; this install holds the copy at
+  `~/.pi/agent/skills/verify-app/`.** The source is
+  `rig/.agents/skills/verify-app/`. `rig/install.sh` copies the kit's skills into
+  the target's `.agents/skills/`, and pi reads the global copy at
+  `skills/verify-app/`. That copy holds the feature map format
+  (`verify/features.tsv`) and a Chrome DevTools Protocol driver
+  (`assets/drive.py`) that returns reached, measured, and a screenshot, with
+  exit 0 pass, 1 fail, 2 unreachable. Verified 2026-11-16 against a local
+  fixture: two rows passed, a missing selector and a dead port both exited 2,
+  and the screenshot showed the rendered page. The driver needs
   `websocket-client`; the venv is `~/.local/share/verify-app-venv`.
 - **The kit's pre-commit hook runs `sync.sh --check`.** Installed by
   `rig/sync.sh --install-hook`, it bakes the kit path in, refuses a commit while

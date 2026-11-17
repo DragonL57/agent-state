@@ -202,6 +202,24 @@ grep -q 'reset --hard' <<< "$grant" ||
     bad "the grant no longer names the irreversible set"
 grep -q 'reviewer' <<< "$grant" ||
     bad "the grant no longer covers a reviewer's user decision"
+grep -q 'never asks the user whether to review' "$contract" ||
+    bad "AGENTS.md lets the orchestrator ask the user whether to review"
+grep -q 'never reviews its own change' "$contract" ||
+    bad "AGENTS.md lets the orchestrator review its own change"
+grep -q 'report\. Both are mandatory\.' "$contract" ||
+    bad "AGENTS.md no longer makes spec-reviewer and taste-reviewer mandatory"
+! grep -q 'No reviewers\.' "$contract" ||
+    bad "AGENTS.md offers 'No reviewers.' as a report line again"
+grep -q 'spec-reviewer: not run, single-file exemption\.' "$contract" ||
+    bad "AGENTS.md's single-file exemption line no longer names a reviewer and its verdict"
+ok
+
+# The playbooks live in the kit and in `rig/playbooks/`. `rig/install.sh` writes
+# a third copy to `.rig/playbooks/` on every run, so a directory there is a stale
+# copy that the next install restores and agents can read in place of the
+# rendered one.
+[ -e "$repo/.rig/playbooks" ] &&
+    bad ".rig/playbooks exists; rig/install.sh recreates that stale third copy on every run"
 ok
 
 # Every grant rule is a constraint, not advice. The evidence on rule polarity
