@@ -221,6 +221,10 @@ grep -q 'report\. Both are mandatory\.' "$contract" ||
     bad "AGENTS.md offers 'No reviewers.' as a report line again"
 grep -q 'spec-reviewer: not run, single-file exemption\.' "$contract" ||
     bad "AGENTS.md's single-file exemption line no longer names a reviewer and its verdict"
+grep -q 'push, ship, land, and commit' "$contract" ||
+    bad "AGENTS.md no longer treats a git-record instruction as a completion signal"
+grep -q 'close the tracker' "$contract" ||
+    bad "AGENTS.md no longer closes the tracker task before recording the work"
 ok
 
 # The playbooks live in the kit and in `rig/playbooks/`. `rig/install.sh` writes

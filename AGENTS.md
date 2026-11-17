@@ -243,6 +243,9 @@ prompt.
   `restore`, `worktree`, `remote`, `clean`, and `rm` alone.
   Commit locally when the user asks or a grant covers the run, and report the
   commits that are waiting.
+- push, ship, land, and commit mean finish the work first: close the tracker
+  task, check each acceptance criterion against the code, and report one that
+  fails. The instruction also approves the commit that records the work.
 - Do not commit before the task code and the changelog entry are ready. Format:
   `<task-code> <type>: <summary>` (Conventional Commits; the repo's own
   convention wins, and the project's `AGENTS.md` names its prefix). When the repo
