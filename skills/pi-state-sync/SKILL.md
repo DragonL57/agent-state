@@ -11,7 +11,7 @@ Pi state is Git-backed at `~/.pi/agent` on branch `main`, remote `https://github
 
 Allowlist: `.gitignore`, `README.md`, `HARNESS.md`, `settings.json`, `subagents.json`, `models.json`, `keybindings.json`, `AGENTS.md`, `SYSTEM.md`, `APPEND_SYSTEM.md`, `agents/`, `rig/`, `extensions/`, `skills/`, `prompts/`, `themes/`.
 
-Ignored: `.env`, `auth.json`, `trust.json`, `models-store.json`, `sessions/`, `npm/`, `git/`, `bin/`, `node_modules/`.
+Ignored: `.env`, `auth.json`, `trust.json`, `models-store.json`, `sessions/`, `npm/`, `git/`, `bin/`, `node_modules/`, `mcp-cache.json`, `mcp-npx-cache.json`.
 
 ## Daily workflow
 

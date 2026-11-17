@@ -8,6 +8,8 @@ npm/
 git/
 bin/
 node_modules/
+mcp-cache.json
+mcp-npx-cache.json
 
 # host-local pi installation and ad-hoc backups
 install/
