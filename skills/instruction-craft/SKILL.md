@@ -38,6 +38,16 @@ behind the rest.
 
 ## 2. The sentence
 
+### Write the constraint, not the prescription
+
+Bad: `Write clean code.`
+Good: `Do not refactor or reformat code unrelated to the task.`
+
+The evidence in section 1 found negative constraints help and positive
+directives hurt on average. When a constraint can carry the rule, write the
+constraint, because the reader can check it against the code. A command the
+agent must run stays a command: the command is its own check.
+
 ### One action per rule, imperative mood
 
 Bad: `You should try to make sure the tests are run before you commit.`
@@ -85,6 +95,24 @@ disagree about whether it was followed, it is advice, not a rule.
 Bad: `Write clean, maintainable code.`
 Good: `Do not leave a function longer than the one it replaces.`
 
+### Show the whole file
+
+```markdown
+# Payments service
+
+- Do not log a card number, a CVV, or a full PAN. Log the last four digits.
+- Run `pnpm test --filter payments` before every commit.
+- When the schema changes, run `pnpm db:migrate` before the tests.
+- Do not add a dependency for a problem the standard library solves.
+- Do not refactor or reformat code unrelated to the task.
+```
+
+The header costs nothing and says what the file governs. Three lines are
+negative constraints, the class the evidence says helps. One names the check.
+One is condition-first: the schema change is the trigger, the migration is the
+action. Every rule is checkable, and none of it repeats what the code already
+says.
+
 ## 3. What to cut
 
 - Theory, philosophy, or a "why" with no imperative attached.
@@ -100,6 +128,8 @@ Good: `Do not leave a function longer than the one it replaces.`
 What survives: exact commands with the flag that matters, rules that differ from
 the default, boundaries, and project gotchas that cost real time when discovered
 wrong.
+
+The cut list is a test set for a draft, so its items are nouns.
 
 ## 4. The session
 
@@ -176,6 +206,15 @@ A skill's description is its routing key: only `name` and `description` sit in
 the system prompt at startup, and the model picks by reasoning over that text
 alone. A new skill that routes on a claimed trigger does not add a capability;
 it adds a coin flip.
+
+### Writing the description
+
+- Do not name a topic where the user's own words give a trigger. "Use when the
+  user shares screenshots" opens the skill; "visual design expertise" does not.
+- Promise only what the body delivers. A description that oversells opens the
+  skill on work it cannot finish.
+- Do not open two skills on the same phrase. Overlapping triggers mean the model
+  picks one and the other never loads.
 
 ### A short skill is a line in AGENTS.md
 
