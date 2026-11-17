@@ -20,7 +20,8 @@
     "npm:@lll9p/pi-better-compaction",
     "https://github.com/5omeOtherGuy/pi-mistral-subscription",
     "npm:@scriptdude/pi-promptimize",
-    "npm:@tintinweb/pi-subagents"
+    "npm:@tintinweb/pi-subagents",
+    "npm:speak-like-you-eat"
   ],
   "quietStartup": true,
   "tuiMode": "fullscreen",
@@ -38,6 +39,6 @@
     "{\"source\":\"npm:pi-permission-system@0.8.0\",\"scope\":\"user\"}": "0.8.0",
     "{\"source\":\"npm:@estebanforge/pi-codegraph-enhanced\",\"scope\":\"user\"}": "1.1.3",
     "{\"source\":\"npm:@moejay/pi-state-sync\",\"scope\":\"user\"}": "0.3.1",
-    "{\"source\":\"npm:@tintinweb/pi-subagents\",\"scope\":\"user\"}": "0.25.0"
+    "{\"source\":\"npm:@tintinweb/pi-subagents\",\"scope\":\"user\"}": "0.26.0"
   }
 }

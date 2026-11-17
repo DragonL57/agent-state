@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "model": {
+    "provider": "mistral",
+    "id": "mistral-small-latest"
+  }
+}
