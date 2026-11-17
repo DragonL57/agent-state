@@ -186,16 +186,25 @@ for agent, entry in sorted(saved.get("pi", {}).items()):
 fi
 ok
 
-# The contract's autonomy rules are load-bearing. A grant is what lets a run
-# finish without a checkpoint per step, and the exit condition is what tells it
-# when to stop. A later edit that drops either one leaves no trace, so check the
-# names here.
+# The contract's load-bearing rules are checked, not trusted. A grant is what
+# lets a run finish without a checkpoint per step. The plan gate and the exit
+# condition are what tell it when to start and when to stop, and they live in
+# two files: the gate in the contract, the procedure in the playbook. A later
+# edit that drops any of them leaves no trace, so check the names here.
 contract="$repo/AGENTS.md"
 [ -f "$contract" ] || bad "AGENTS.md is missing"
 grant="$(sed -n '/^## Autonomy grant$/,/^## /p' "$contract")"
 [ -n "$grant" ] || bad "AGENTS.md lost its Autonomy grant section"
-grep -q 'Done when:' "$contract" ||
-    bad "AGENTS.md no longer requires an exit condition in the plan"
+planbook="$repo/rig/playbooks/workflow.md"
+[ -f "$planbook" ] || bad "workflow.md is missing"
+grep -q 'Done when:' "$planbook" ||
+    bad "workflow.md no longer requires an exit condition in the plan"
+grep -q 'before the plan exists' "$contract" ||
+    bad "AGENTS.md no longer gates work on a plan"
+grep -q 'rig/playbooks/workflow.md' "$contract" ||
+    bad "AGENTS.md no longer points at the playbook that holds the plan procedure"
+! grep -q 'Done when:' "$contract" ||
+    bad "AGENTS.md duplicates the exit condition that workflow.md step 1 owns"
 grep -q 'decisions/<slug>.tsv' "$contract" ||
     bad "AGENTS.md lost the decision-trail convention"
 grep -q 'reset --hard' <<< "$grant" ||

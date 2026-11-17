@@ -8,8 +8,8 @@ being true.
 
 ## Open
 
-- **The brief is the only unreviewed artifact.** `AGENTS.md` line 15 tells the
-  session the user is the verified owner, and line 153 makes the main session
+- **The brief is the only unreviewed artifact.** The Operating Protocol tells the
+  session the user is the verified owner, and the Delegation section makes the main session
   the only actor that talks to the user. When this install is driven by an
   external orchestrator, that orchestrator holds the user role: its brief
   arrives pre-approved and final. The six reviewers check the work against the
@@ -80,10 +80,11 @@ being true.
   hand edit survives a render. A playbook or agent edit does not: it is drift
   until the kit has it.
 - **The contract's autonomy rules are checked, not trusted.** `AGENTS.md` names
-  the grant, the `Done when:` plan field, the decision-trail path, and the
-  irreversible set, and `tests/test_harness.sh` fails when one is dropped. Every
-  grant rule is a constraint rather than advice, and the test fails on a bullet
-  that reads as advice. The evidence for the polarity rule is in
+  the grant, the decision-trail path, the irreversible set, and the plan gate;
+  `rig/playbooks/workflow.md` step 1 carries the `Done when:` exit condition.
+  `tests/test_harness.sh` fails when any of them is dropped. Every grant rule is
+  a constraint rather than advice, and the test fails on a bullet that reads as
+  advice. The evidence for the polarity rule is in
   `skills/instruction-craft/SKILL.md` section 1.
 - **The decision trail stays out of the user's repos.** A grant run writes
   `~/.pi/agent/decisions/<slug>.tsv`, not a file in the repo root, because git
