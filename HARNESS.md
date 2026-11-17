@@ -12,7 +12,7 @@ being true.
   session the user is the verified owner, and line 153 makes the main session
   the only actor that talks to the user. When this install is driven by an
   external orchestrator, that orchestrator holds the user role: its brief
-  arrives pre-approved and final. The five reviewers check the work against the
+  arrives pre-approved and final. The six reviewers check the work against the
   brief, not against what the real principal asked for, so a vague or wrong
   brief is executed competently and passes review. Nothing in the harness
   reviews the translation from intent to brief. Until an intake step exists
@@ -48,10 +48,10 @@ being true.
   model and effort per pinned agent, written by `rig/install.sh` and rendered
   into `agents/*.md`. Every role runs `mistral/deepseek-v4-1-flash-1017`, the
   only DeepSeek the Mistral provider carries here, and the effort is the only
-  difference: implementer `medium`, taste and spec and test `high`, docs `low`,
-  final `max`. One model across roles means the final review is not an
-  independent opinion; the effort ladder is the compensation, and a second
-  model is the fix once the account carries one. `tests/test_harness.sh`
+  difference: implementer `medium`, taste, spec, test and uiux `high`,
+  docs `low`, final `max`. One model across roles means the final review is
+  not an independent opinion; the effort ladder is the compensation, and a
+  second model is the fix once the account carries one. `tests/test_harness.sh`
   compares each agent file against `models.json`, so the file is the one place
   a model changes.
 - **The kit is the source for the playbooks and agents.** `/home/thelong/rig`

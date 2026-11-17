@@ -12,6 +12,10 @@
       "model": "mistral/deepseek-v4-1-flash-1017",
       "effort": "high"
     },
+    "uiux-reviewer": {
+      "model": "mistral/deepseek-v4-1-flash-1017",
+      "effort": "high"
+    },
     "docs-reviewer": {
       "model": "mistral/deepseek-v4-1-flash-1017",
       "effort": "low"
