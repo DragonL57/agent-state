@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### TASK-4 Give the test suite its own git identity
+
+- The test suite sets `GIT_AUTHOR_*` and `GIT_COMMITTER_*` once, in an `IDENTITY` constant, and spreads it into the `git` helper, the `manager` spawn, and the `managerWithHomes` spawn. On a GitHub Actions runner with no global `user.name`, every test that committed died with `fatal: empty ident name`; `npm run check` now passes with `GIT_CONFIG_GLOBAL=/dev/null`.
+- The three per-repo `git config user.*` pairs are deleted, so the identity has one owner.
+
 ### TASK-3 Plan and spawn parallel slices
 
 - `reviewing.md` files a change that its branch, its commits, and `backlog task list` all fail to tie to a task as `must-fix`. Before this, the class had no entry, so the gap went unreported. `spec-reviewer` had the same hole at its "find the spec" step 3, where "say so explicitly" let the review continue.

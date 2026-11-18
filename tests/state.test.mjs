@@ -7,19 +7,29 @@ import test from "node:test";
 
 const MANAGER = new URL("../tools/state.py", import.meta.url).pathname;
 
+// A commit needs an identity, and a CI runner has no global one. Both helpers
+// pass these, so a commit made here and one made by the manager both work.
+const IDENTITY = {
+	GIT_AUTHOR_NAME: "t",
+	GIT_AUTHOR_EMAIL: "t@example.com",
+	GIT_COMMITTER_NAME: "t",
+	GIT_COMMITTER_EMAIL: "t@example.com",
+};
+
 function git(root, ...args) {
-	return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+	const env = { ...process.env, ...IDENTITY };
+	return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", env }).trim();
 }
 
 function manager(root, ...args) {
-	const env = { ...process.env, AGENT_STATE_DIR: root, AGENT_STATE_TEST: "1" };
+	const env = { ...process.env, ...IDENTITY, AGENT_STATE_DIR: root, AGENT_STATE_TEST: "1" };
 	const result = spawnSync("python3", ["-I", MANAGER, ...args], { env, encoding: "utf8" });
 	return { code: result.status, out: result.stdout, err: result.stderr };
 }
 
 /** The manager as normally invoked, plus a managed home pair. */
 function managerWithHomes(pi, claude) {
-	const env = { ...process.env, AGENT_PI_HOME: pi, AGENT_CLAUDE_HOME: claude };
+	const env = { ...process.env, ...IDENTITY, AGENT_PI_HOME: pi, AGENT_CLAUDE_HOME: claude };
 	delete env.AGENT_STATE_TEST;
 	return (root, ...args) => {
 		const result = spawnSync("python3", ["-I", MANAGER, ...args], {
@@ -38,8 +48,6 @@ function taskRepo() {
 	mkdirSync(join(root, "backlog", "tasks"), { recursive: true });
 	writeFileSync(join(root, "backlog", "tasks", "task-1 - A-Thing Done.md"), "---\nid: TASK-1\n---\n");
 	git(root, "init", "-q", "-b", "main");
-	git(root, "config", "user.email", "t@example.com");
-	git(root, "config", "user.name", "t");
 	git(root, "add", "-A");
 	git(root, "commit", "-qm", "chore: first task");
 	return root;
@@ -67,8 +75,6 @@ function fixture() {
 	writeFileSync(join(root, "shared", "skills", "example", "SKILL.md"), "---\nname: example\n---\n");
 	git(root, "init", "-q", "-b", "main");
 	cpSync(new URL("../tools/state.py", import.meta.url).pathname, join(root, "tools", "state.py"));
-	git(root, "config", "user.email", "t@example.com");
-	git(root, "config", "user.name", "t");
 	git(root, "add", "-A");
 	git(root, "commit", "-qm", "init");
 	return root;
@@ -197,8 +203,6 @@ test("a repo's first commit needs no task, whatever it changes", () => {
 		mkdirSync(join(fresh, "backlog", "tasks"), { recursive: true });
 		writeFileSync(join(fresh, "shared", "example.txt"), "work\n");
 		git(fresh, "init", "-q", "-b", "main");
-		git(fresh, "config", "user.email", "t@example.com");
-		git(fresh, "config", "user.name", "t");
 		const result = manager(fresh, "snapshot", "chore: first commit");
 		assert.equal(result.code, 0, result.err);
 		assert.equal(git(fresh, "log", "-1", "--format=%s"), "chore: first commit");
