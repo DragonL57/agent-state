@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
 """agent-state: one Git-backed configuration, maintained for pi and Claude Code.
 
-The repository is the source. Each host keeps a *clone* of it (its own checkout,
-its own branch is never used: everything lives on `main`), and renders the
-host's homes from it:
+The repository is the source. Each machine keeps one *clone* of it (its own
+branch is never used: everything lives on `main`), and renders the configured
+homes from it:
 
     ~/.pi/agent     pi's home; rendered from shared/ (AGENTS.md, skills, prompts)
     ~/.claude       Claude Code's home; rendered from shared/ in Claude's
                     conventions, plus the Claude plugin
 
+The hosts a machine renders come from `AGENT_STATE_HOSTS`, then this clone's
+`config.json` `hosts` key, then both.
+
 Commands (same verbs on every host):
 
-    pull      fetch and fast-forward this clone, then render both homes
+    pull      fetch and fast-forward this clone, then render the configured homes
     status    what changed in the tree, and which host copy drifted
     snapshot  stage, validate, and commit locally
     push      upload existing commits; never commits
-    sync      render both homes from the clone without touching git
+    sync      render the configured homes from the clone without touching git
     check     print one line per host copy that drifted (hook payload)
-    hosts     print where each host clones from and where the state lives
+    hosts     print the configured hosts, where each home lives, and the clone
 
 The design rule is the parent package's: no command both writes a commit and
 uploads it, and nothing runs Git from a lifecycle hook.
@@ -86,7 +89,9 @@ def _dirs(path: Path) -> list[Path]:
     return sorted(child for child in path.iterdir() if child.is_dir()) if path.is_dir() else []
 
 SECRET_KEY = re.compile(r"(?:api[-_]?key|token|secret|password|authorization)", re.I)
+# A lockfile's values are package names and version pairs, never a secret.
 SAFE_LITERAL = {"dummy", "local", "none", "ollama"}
+VERSION = re.compile(r"^\d+\.\d+\.\d+")
 
 
 class StateError(RuntimeError):
@@ -167,7 +172,12 @@ def tracked_violations(root: Path) -> list[str]:
 
 def _safe_reference(value: str) -> bool:
     value = value.strip()
-    return value.startswith("$") or value.startswith("!") or value.lower() in SAFE_LITERAL
+    return (
+        value.startswith("$")
+        or value.startswith("!")
+        or value.lower() in SAFE_LITERAL
+        or bool(VERSION.match(value))
+    )
 
 
 def literal_secrets(value, path="$", issues: list[str] | None = None) -> list[str]:
@@ -223,9 +233,9 @@ def _frontmatter(text: str) -> tuple[dict[str, str], str]:
     return keys, body
 
 
-def rewrite_paths(text: str, root: Path, home: Path) -> str:
-    """The shared tree speaks in `{{AGENT_STATE}}`; each host resolves it to its home."""
-    return text.replace("{{AGENT_STATE}}", str(home))
+def rewrite_paths(text: str, root: Path) -> str:
+    """The shared tree speaks in `{{AGENT_STATE}}`; it resolves to the clone, where the content lives."""
+    return text.replace("{{AGENT_STATE}}", str(root))
 
 
 CLAUDE_TOOLS = {
@@ -264,17 +274,17 @@ def claude_agent(root: Path, path: Path, claude_home: Path) -> str | None:
     lines = ["---", f"name: {path.stem}", f"description: {keys.get('description', '')}"]
     if tools:
         lines.append(f"tools: {', '.join(tools)}")
-    lines += ["---", "", rewrite_paths(body, root, claude_home)]
+    lines += ["---", "", rewrite_paths(body, root)]
     return "\n".join(lines)
 
 
 def claude_contract(root: Path, claude_home: Path) -> str:
-    """The whole contract, with the state path pointing at the Claude home.
+    """The whole contract, with the state path pointing at the clone.
 
     The owner's choice is that Claude Code carries the same rules as pi, so
-    nothing is stripped. The only difference is where `{{AGENT_STATE}}` resolves.
+    nothing is stripped. Both hosts resolve `{{AGENT_STATE}}` to the clone.
     """
-    return rewrite_paths((SHARED / "AGENTS.md").read_text(), root, claude_home)
+    return rewrite_paths((SHARED / "AGENTS.md").read_text(), root)
 
 
 # --------------------------------------------------------------------- homes
@@ -299,12 +309,36 @@ def claude_home() -> Path:
     return _home("AGENT_CLAUDE_HOME", "~/.claude")
 
 
+DEFAULT_HOSTS = ("pi", "claude")
+
+
+def _hosts(root: Path) -> list[str]:
+    """The hosts this machine renders: AGENT_STATE_HOSTS, then the tracked
+    config.json `hosts` key, then both."""
+    env = os.environ.get("AGENT_STATE_HOSTS")
+    if env:
+        hosts = [name.strip() for name in env.split(",") if name.strip()]
+    else:
+        config = root / "config.json"
+        try:
+            data = json.loads(config.read_text()) if config.exists() else {}
+        except json.JSONDecodeError as error:
+            raise StateError(f"config.json is not valid JSON ({error}). Fix its `hosts` key.")
+        hosts = data.get("hosts", list(DEFAULT_HOSTS))
+        if not isinstance(hosts, list) or not hosts:
+            raise StateError('config.json `hosts` must be a non-empty list, as in {"hosts": ["pi"]}.')
+    for host in hosts:
+        if host not in DEFAULT_HOSTS:
+            raise StateError(f"Unknown host {host!r}. Use: {', '.join(DEFAULT_HOSTS)}.")
+    return hosts
+
+
 def pi_contract(root: Path, home: Path) -> str:
     """shared/AGENTS.md with the pi-only environment rules appended."""
-    text = rewrite_paths((SHARED / "AGENTS.md").read_text(), root, home).rstrip() + "\n"
+    text = rewrite_paths((SHARED / "AGENTS.md").read_text(), root).rstrip() + "\n"
     append = PI / "AGENTS.append.md"
     if append.exists():
-        extra = rewrite_paths(append.read_text(), root, home).strip()
+        extra = rewrite_paths(append.read_text(), root).strip()
         if extra:
             text += "\n" + extra + "\n"
     return text
@@ -312,7 +346,13 @@ def pi_contract(root: Path, home: Path) -> str:
 
 def check_homes(root: Path) -> None:
     """A clone nested inside a home it renders would overwrite its own sources."""
-    for home in (pi_home(), claude_home()):
+    if os.environ.get("AGENT_STATE_TEST"):
+        needed = {"pi": "AGENT_PI_HOME", "claude": "AGENT_CLAUDE_HOME"}
+        missing = [needed[host] for host in _hosts(root) if not os.environ.get(needed[host])]
+        if missing:
+            raise StateError("AGENT_STATE_TEST=1 refuses to render without " + " and ".join(missing) + ".")
+    homes = [pi_home()] + ([claude_home()] if os.environ.get("AGENT_CLAUDE_HOME") or "claude" in _hosts(root) else [])
+    for home in homes:
         if root == home or home in root.parents:
             raise StateError(
                 f"The clone at {root} sits inside the home it renders ({home}). "
@@ -341,7 +381,7 @@ def render_home(root: Path, host: str) -> list[str]:
                 shutil.copytree(src, dst, dirs_exist_ok=True)
             elif src.exists():
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                dst.write_text(rewrite_paths(src.read_text(), root, home))
+                dst.write_text(rewrite_paths(src.read_text(), root))
             written.append(str(dst))
         (home / "AGENTS.md").write_text(pi_contract(root, home))
         written.append(str(home / "AGENTS.md"))
@@ -350,7 +390,7 @@ def render_home(root: Path, host: str) -> list[str]:
         for path in skill_files:
             if path.is_file() and path.suffix in (".md", ".sh", ".py"):
                 original = path.read_text()
-                rewritten = rewrite_paths(original, root, home)
+                rewritten = rewrite_paths(original, root)
                 if rewritten != original:
                     path.write_text(rewritten)
         return written
@@ -373,7 +413,7 @@ def render_home(root: Path, host: str) -> list[str]:
             head.append(f"description: {keys['description']}")
         if keys.get("argument-hint"):
             head.append(f"argument-hint: {keys['argument-hint']}")
-        head += ["---", "", rewrite_paths(body, root, home)]
+        head += ["---", "", rewrite_paths(body, root)]
         (home / "commands").mkdir(parents=True, exist_ok=True)
         (home / "commands" / src.name).write_text("\n".join(head))
         written.append(str(home / "commands" / src.name))
@@ -398,21 +438,24 @@ def render_home(root: Path, host: str) -> list[str]:
 def drift(root: Path) -> list[tuple[str, str]]:
     """Which host copies differ from what the clone would render. Read-only, git-free."""
     check_homes(root)
+    hosts = _hosts(root)
     findings: list[tuple[str, str]] = []
-    home = pi_home()
-    if (home / "AGENTS.md").exists():
-        render = pi_contract(root, home)
-        if (home / "AGENTS.md").read_text() != render:
-            findings.append(("pi", str(home / "AGENTS.md")))
-    home = claude_home()
-    contract = claude_contract(root, home)
-    if (home / "CLAUDE.md").exists() and (home / "CLAUDE.md").read_text() != contract:
-        findings.append(("claude", str(home / "CLAUDE.md")))
-    for src in sorted((SHARED / "agents").glob("*.md")):
-        expected = claude_agent(root, src, home)
-        target = home / "agents" / src.name
-        if expected is not None and target.exists() and target.read_text() != expected:
-            findings.append(("claude", str(target)))
+    if "pi" in hosts:
+        home = pi_home()
+        if (home / "AGENTS.md").exists():
+            render = pi_contract(root, home)
+            if (home / "AGENTS.md").read_text() != render:
+                findings.append(("pi", str(home / "AGENTS.md")))
+    if "claude" in hosts:
+        home = claude_home()
+        contract = claude_contract(root, home)
+        if (home / "CLAUDE.md").exists() and (home / "CLAUDE.md").read_text() != contract:
+            findings.append(("claude", str(home / "CLAUDE.md")))
+        for src in sorted((SHARED / "agents").glob("*.md")):
+            expected = claude_agent(root, src, home)
+            target = home / "agents" / src.name
+            if expected is not None and target.exists() and target.read_text() != expected:
+                findings.append(("claude", str(target)))
     return findings
 
 
@@ -431,13 +474,15 @@ def cmd_pull(root: Path) -> str:
     if git(root, "status", "--porcelain").strip():
         raise StateError("The state tree is dirty. Snapshot or discard changes first.")
     git(root, "pull", "--ff-only")
-    written = render_home(root, "pi") + render_home(root, "claude")
-    return f"Pulled and rendered {len(written)} files into both homes."
+    return "Pulled. " + cmd_sync(root)
 
 
 def cmd_sync(root: Path) -> str:
-    written = render_home(root, "pi") + render_home(root, "claude")
-    return f"Rendered {len(written)} files into both homes."
+    hosts = _hosts(root)
+    written: list[str] = []
+    for host in hosts:
+        written += render_home(root, host)
+    return f"Rendered {len(written)} files into: {', '.join(hosts)}."
 
 
 def cmd_status(root: Path) -> str:
@@ -500,6 +545,7 @@ def cmd_hosts(root: Path) -> str:
     return "\n".join(
         [
             f"state:  {root}",
+            f"hosts:  {', '.join(_hosts(root))}",
             f"pi:     {pi_home()}",
             f"claude: {claude_home()}",
             f"origin: {git(root, 'remote', 'get-url', 'origin', check=False).strip() or 'not set'}",
@@ -520,7 +566,11 @@ def main(argv: list[str]) -> int:
             _bind(root)
         except StateError:
             return 0  # A hook must never block a session over a missing checkout.
-        text = cmd_check(root)
+        try:
+            text = cmd_check(root)
+        except StateError as error:
+            print(f"agent-state: {error}", file=sys.stderr)
+            return 1
         if text:
             print(text, file=sys.stderr if args.json else sys.stdout)
         return 1 if text else 0

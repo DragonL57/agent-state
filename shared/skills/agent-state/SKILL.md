@@ -5,7 +5,7 @@ description: Work with the Git-backed agent state shared by pi and Claude Code â
 
 # Agent state
 
-One repository, `DragonL57/agent-state`, checked out on every host at `~/agent-state` and rendered into both homes by one manager, `tools/state.py`. Pi reaches it through the forked extension (`/agent-state`) and Claude Code through the `agent-state` plugin's `/pull`, `/status`, `/snapshot`, `/push` and `/sync` commands. Both call the same script.
+One repository, `DragonL57/agent-state`, checked out on every machine at `~/agent-state` and rendered into the configured homes by one manager, `tools/state.py`. Pi reaches it through the forked extension (`/agent-state`) and Claude Code through the `agent-state` plugin's `/pull`, `/status`, `/snapshot`, `/push` and `/sync` commands. Both call the same script.
 
 ## The two halves
 
@@ -29,14 +29,14 @@ No command commits and pushes together. `pull` is fast-forward only and refuses 
 ## What the renderer translates
 
 - **Contract.** `shared/AGENTS.md` becomes `~/.claude/CLAUDE.md` with the pi-only environment rules left out; on pi it becomes `~/.pi/agent/AGENTS.md` with `hosts/pi/AGENTS.append.md` appended.
-- **Agents.** `shared/agents/*.md` become Claude agent files with capitalised tools (`write` grants `Write, Edit`), `thinking`/`exclude_extensions` dropped, and every `{{AGENT_STATE}}` path pointing at `~/.claude`. Claude agents carry **no** `model:` or `effort:` so they inherit the session's.
+- **Agents.** `shared/agents/*.md` become Claude agent files with capitalised tools (`write` grants `Write, Edit`), `thinking`/`exclude_extensions` dropped, and every `{{AGENT_STATE}}` path pointing at the clone. Claude agents carry **no** `model:` or `effort:` so they inherit the session's.
 - **Prompts** become `~/.claude/commands/*.md`, keeping `description` and `argument-hint`.
-- **Skills** are symlinked into `~/.claude/skills/`, except the pi-only ones (`modern-web-guidance`, `verify-app`).
+- **Skills** are symlinked into `~/.claude/skills/`, except the pi-only ones (`pi-state-sync`).
 
 ## Do not
 
 - Do not hand-edit a rendered file (`~/.claude/CLAUDE.md`, `~/.claude/agents/*`, `~/.pi/agent/AGENTS.md`). Edit `shared/` and run `sync`; `status` reports a host copy that drifted.
 - Do not add a host-only file to `shared/`. Put it under `hosts/<name>/`.
 - Do not commit `EXA_API_KEY`. `websearch.ts` reads `process.env.EXA_API_KEY`; set it in the login shell profile on each host.
-- Do not refresh the modern-web-guidance corpus by accident. On a fresh clone run `bash {{AGENT_STATE}}/skills/modern-web-guidance/sync.sh` once (about 700 KB from a pinned commit sha), then `--check`.
+- Do not refresh the modern-web-guidance corpus by accident. On a fresh clone run `bash shared/skills/modern-web-guidance/sync.sh` from the clone root once (about 700 KB from a pinned commit sha), then `--check`.
 - The repository is **public**: every tracked file is world-readable. No credentials, no machine-identifying host paths, no operational detail that would be a problem if indexed.

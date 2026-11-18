@@ -74,7 +74,7 @@ owner only.
   passing test. Never conclude a verification attempt with a warning instead of
   a result.
 - A run under a grant writes one row per iteration to
-  `{{AGENT_STATE}}/decisions/<slug>.tsv`, where the slug is the branch name or the
+  `decisions/<slug>.tsv` beside this contract, where the slug is the branch name or the
   task code. The first row creates the directory and writes the header.
   Tab-separated columns: time, phase, decision, reason, evidence, result. The
   `decision` column names the approach, which is how a plateau is counted. The
@@ -90,7 +90,7 @@ owner only.
   completeness.
 - Promise discipline: do not commit to tests or refactors you will not do now;
   label them optional next steps.
-- Pending harness work lives in `{{AGENT_STATE}}/HARNESS.md`, not in the todo list.
+- Pending harness work lives in `HARNESS.md` beside this contract, not in the todo list.
   Read it when the work touches this setup, and delete an item there when it
   lands.
 - A "review" request means code review: findings first, ordered by severity,
@@ -112,8 +112,8 @@ owner only.
 One sentence in the user's message names the work and grants it. "run it
 overnight", "don't stop", "land it", and "be fully autonomous" all count. The
 grant covers the work it names, every step that finishes it, the repos it names
-plus `{{AGENT_STATE}}`, and a write outside them. Where a playbook or a skill asks,
-a grant answers.
+plus the clone and the harness home, and a write outside them. Where a playbook
+or a skill asks, a grant answers.
 
 - Do not ask before a reversible step. Do the step, and write its row to the
   decision trail.
@@ -234,7 +234,7 @@ prompt.
   `pull`, `fetch`, `merge`, `rebase`, `cherry-pick`, `revert`, `reset`,
   `checkout`, `switch`, `restore`, `stash`, `tag`, `branch`, `worktree`,
   `remote`, `clean`, `rm`) without the user's explicit go-ahead in the current
-  turn. Editing files is allowed; recording them in git is not. Read-only
+  turn. `git clean -ndx` (dry-run, keep `-n`) stays read-only. Editing files is allowed; recording them in git is not. Read-only
   commands (`status`, `log`, `diff`, `show`, `blame`, `config --get`) stay fine.
   An approval given for an earlier step does not carry over to the next one.
   An autonomy grant is the exception: it carries `commit`, `checkout`,

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### TASK-1 Render each host's home correctly
+
+- `{{AGENT_STATE}}` resolves to the clone in both renderers (`tools/state.py`'s `rewrite_paths`, `extensions/pi-state/translate.ts`'s `claudePaths`). Rendered files named a home that held none of the content: ten paths were missing on pi and eleven on Claude Code.
+- `sync`, `pull` and `check` touch only the hosts this machine renders. The tracked `config.json` `hosts` key names them, `AGENT_STATE_HOSTS` overrides it, and both run when neither is set. `hosts` prints the list.
+- Three shared lines name a skill or prompt directory relative to the harness home instead of one host's absolute path: `shared/agents/uiux-reviewer.md`, `shared/skills/instruction-craft/SKILL.md`.
+
 ## 0.1.0
 
 First release of agent-state, a fork of `pi-state-sync` that serves pi and Claude Code from one tree.

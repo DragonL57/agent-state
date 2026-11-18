@@ -33,6 +33,7 @@ statsig/
 debug/
 ide/
 node_modules/
+decisions/
 *.tgz
 __pycache__/
 *.pyc

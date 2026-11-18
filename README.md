@@ -1,27 +1,37 @@
 # agent-state
 
-Git-backed configuration for **two agent hosts at once**: [pi](https://pi.dev) and [Claude Code](https://claude.com/claude-code).
+Git-backed configuration for **two agent hosts**: [pi](https://pi.dev) and [Claude Code](https://claude.com/claude-code).
 
-One repository holds the contract, agents, playbooks, prompts, skills and rig kit. Each host keeps its own clone and renders its own home from it: pi into its agent home (`AGENTS.md`, `agents/`, `prompts/`, `skills/`, `settings.json`), Claude Code into `~/.claude` (`CLAUDE.md`, `agents/`, `commands/`, `skills/`) plus the Claude plugin. A change is written once, on either host, and the other host picks it up with its own `pull`.
+One repository holds the contract, agents, playbooks, prompts, skills and rig kit. Each machine keeps one clone and renders the homes of the hosts it runs: pi into its agent home (`AGENTS.md`, `agents/`, `prompts/`, `skills/`, `settings.json`), Claude Code into `~/.claude` (`CLAUDE.md`, `agents/`, `commands/`, `skills/`) plus the Claude plugin. A machine that runs one host renders one home. A change is written once, on either host, and the others pick it up with their own `pull`.
 
 ## Quick start
 
-One clone serves both hosts on a machine. Clone it beside the homes, never inside one:
+One clone per machine serves every host on it. Clone it beside the homes, never inside one:
 
 ```bash
 git clone https://github.com/DragonL57/agent-state.git ~/agent-state
 ```
 
-The clone is the state; the homes (`~/.pi/agent`, `~/.claude`) are rendered *from* it. Point both hosts at the clone with `AGENT_STATE_DIR`, then render:
+The clone is the state; the homes (`~/.pi/agent`, `~/.claude`) are rendered *from* it. Point the hosts at the clone with `AGENT_STATE_DIR`, then render:
 
 ```bash
 export AGENT_STATE_DIR=~/agent-state    # add to your shell profile
 python3 -I ~/agent-state/tools/state.py sync
 ```
 
-`sync` writes both homes from the clone. Everything below is the per-host install.
+`sync` writes the configured homes from the clone. Everything below is the per-host install.
 
 > `~/agent-state` is the default when `AGENT_STATE_DIR` is unset, so the export is optional — set it if you cloned somewhere else.
+
+### Which hosts a machine renders
+
+`sync`, `pull` and `check` touch only the hosts this machine is configured for. The tracked `config.json` names them:
+
+```json
+{ "hosts": ["pi"] }
+```
+
+`AGENT_STATE_HOSTS` (comma-separated, for example `AGENT_STATE_HOSTS=claude`) overrides the file, so set it in the machine's shell profile when a pull rewrites `config.json` with the wrong list. With neither set, both homes render. `hosts` prints the list the manager is using.
 
 ## Install (Claude Code)
 
@@ -43,7 +53,7 @@ Restart pi, then connect the clone from the quick start:
 /agent-state configure
 ```
 
-`configure` connects `origin` if the clone has none, then renders both homes. A clone made with `git clone` already has `origin`, so it reports "already configured" and stops; in that case the quick start's `sync` is the step that renders. If the clone does not exist it errors with the `git clone` line rather than creating state inside the pi home. Pass a URL to use a fork: `/agent-state configure https://github.com/you/agent-state.git`.
+`configure` connects `origin` if the clone has none, then renders the configured homes. A clone made with `git clone` already has `origin`, so it reports "already configured" and stops; in that case the quick start's `sync` is the step that renders. If the clone does not exist it errors with the `git clone` line rather than creating state inside the pi home. Pass a URL to use a fork: `/agent-state configure https://github.com/you/agent-state.git`.
 
 ### Migrating off the old `pi-state` layout
 
@@ -82,13 +92,13 @@ The same verbs run on both hosts and are implemented once, in `tools/state.py`.
 
 | Verb | What it does |
 | --- | --- |
-| `pull` | Refuses a dirty tree, fast-forwards, re-renders both homes |
+| `pull` | Refuses a dirty tree, fast-forwards, re-renders the configured homes |
 | `status` | Tree changes, commits behind/ahead of origin, host copies that drifted |
 | `snapshot [message]` | Stages, refuses host-only files and literal secrets, commits **locally** |
 | `push` | Uploads existing commits; never commits |
-| `sync` | Re-renders both homes from the clone; never touches Git |
+| `sync` | Re-renders the configured homes from the clone; never touches Git |
 | `check` | The hook payload: nothing when in sync, one line per finding otherwise |
-| `hosts` | Where the state, each home, and origin live |
+| `hosts` | The configured hosts, where the state, each home, and origin live |
 
 No verb both records and publishes, and nothing runs Git from a lifecycle hook.
 
@@ -109,7 +119,7 @@ extensions/pi-state/ the pi extension: an /agent-state command over the manager
 tools/state.py       the manager both hosts call
 ```
 
-`{{AGENT_STATE}}` is the only path a shared file may use. The pi renderer resolves it to the pi home, the Claude renderer to `~/.claude`; a shared file that hard-codes either path is a bug.
+`{{AGENT_STATE}}` is the only path a shared file may use. Both renderers resolve it to the clone, where playbooks, prompts and `tools/state.py` live; a shared file that hard-codes a home path is a bug.
 
 ## Translation rules
 
@@ -138,7 +148,7 @@ The verbs are automated, and identical on both hosts:
 /push
 ```
 
-`pull` is the one to run first on any machine: it fast-forwards the clone and re-renders both homes, so it is also how a host picks up a change made on the other. Without a plugin command, call the manager directly and get the same result:
+`pull` is the one to run first on any machine: it fast-forwards the clone and re-renders the configured homes, so it is also how a host picks up a change made on the other. Without a plugin command, call the manager directly and get the same result:
 
 ```bash
 python3 -I ~/agent-state/tools/state.py pull     # fetch + fast-forward + re-render

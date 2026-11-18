@@ -18,7 +18,7 @@ The corpus is 209 guides under `guides/<discipline>/<id>.md`, where `<id>` is th
 
 `guides/` and `INDEX.md` are gitignored; agent-state carries only this file and `sync.sh`. Two cases:
 
-- `bash {{AGENT_STATE}}/skills/modern-web-guidance/sync.sh` installs the pinned corpus (network once, about 700 KB download). Run `--check` to verify, `--latest` to move to upstream main and print the sha to pin.
+- `bash sync.sh` installs the pinned corpus (network once, about 700 KB download). Run `--check` to verify, `--latest` to move to upstream main and print the sha to pin.
 - When `guides/` is missing, say so and run the sync before answering from memory.
 
 ## Workflow

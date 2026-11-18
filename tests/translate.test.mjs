@@ -9,7 +9,6 @@ import {
 } from "../extensions/pi-state/translate.ts";
 
 const ROOT = "/home/user/agent-state";
-const CLAUDE = "/home/user/.claude";
 
 test("frontmatter folds a multi-line description and keeps the body", () => {
 	const { keys, body } = splitFrontmatter(
@@ -36,10 +35,13 @@ test("pi tools become capitalised Claude tools, once each", () => {
 	assert.deepEqual(claudeTools(""), []);
 });
 
-test("state paths point at the Claude home", () => {
-	const text = "Read `{{AGENT_STATE}}/playbooks/workflow.md` and `{{AGENT_STATE}}/AGENTS.md`.";
-	const out = claudePaths(text, ROOT, CLAUDE);
-	assert.equal(out, "Read `/home/user/.claude/playbooks/workflow.md` and `/home/user/.claude/AGENTS.md`.");
+test("state paths point at the clone, where the content lives", () => {
+	const text = "Read `{{AGENT_STATE}}/rig/.rig/playbooks/workflow.md` and `{{AGENT_STATE}}/AGENTS.md`.";
+	const out = claudePaths(text, ROOT);
+	assert.equal(
+		out,
+		"Read `/home/user/agent-state/rig/.rig/playbooks/workflow.md` and `/home/user/agent-state/AGENTS.md`.",
+	);
 });
 
 test("a Claude agent drops pi-only keys and inherits the model", () => {
@@ -55,21 +57,21 @@ test("a Claude agent drops pi-only keys and inherits the model", () => {
 		"",
 		"Read `{{AGENT_STATE}}/AGENTS.md`.",
 	].join("\n");
-	const out = toClaudeAgent("implementer", source, ROOT, CLAUDE);
+	const out = toClaudeAgent("implementer", source, ROOT);
 	assert.match(out, /^---\nname: implementer\ndescription: Does the work\.\ntools: Read, Bash, Write, Edit\n---\n/);
-	assert.match(out, /Read `\/home\/user\/\.claude\/AGENTS\.md`\./);
+	assert.match(out, /Read `\/home\/user\/agent-state\/AGENTS\.md`\./);
 	assert.doesNotMatch(out, /thinking:|effort:|model:|exclude_extensions/);
 });
 
 test("an agent excluded from MCP is not published to Claude", () => {
 	const source = "---\ndescription: x\nexclude_extensions: builtin:mcp\n---\nbody\n";
-	assert.equal(toClaudeAgent("worker", source, ROOT, CLAUDE), undefined);
+	assert.equal(toClaudeAgent("worker", source, ROOT), undefined);
 });
 
 test("a prompt becomes a command with its hint", () => {
 	const source = ["---", "description: Do it", "argument-hint: [what]", "---", "", "Go: {{AGENT_STATE}}/x.md"].join("\n");
-	const out = toClaudeCommand("go", source, ROOT, CLAUDE);
+	const out = toClaudeCommand("go", source, ROOT);
 	assert.match(out, /description: Do it\nargument-hint: \[what\]/);
-	assert.match(out, /\/home\/user\/\.claude\/x\.md/);
+	assert.match(out, /\/home\/user\/agent-state\/x\.md/);
 });
 

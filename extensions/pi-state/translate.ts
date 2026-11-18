@@ -8,7 +8,7 @@ import { join } from "node:path";
  *
  *   pi           frontmatter: description, tools (lowercase), thinking, model
  *   Claude Code  frontmatter: name, description, tools (capitalised), model
- *                and a body that reads the global contract from ~/.claude
+ *                and a body that reads the global contract from the clone
  *
  * Every function here is pure on its input text, so the parity tests can hold
  * the mapping still without a filesystem.
@@ -99,12 +99,9 @@ export function claudeTools(tools: string | undefined): string[] {
 	return out;
 }
 
-/**
- * Replace the paths an agent or skill reads with the Claude Code location.
- * The state root is the repo; the host home is ~/.claude.
- */
-export function claudePaths(text: string, _stateRoot: string, claudeHome: string): string {
-	return text.replaceAll("{{AGENT_STATE}}", claudeHome);
+/** `{{AGENT_STATE}}` names the clone, where the content lives. */
+export function claudePaths(text: string, stateRoot: string): string {
+	return text.replaceAll("{{AGENT_STATE}}", stateRoot);
 }
 
 /**
@@ -119,7 +116,6 @@ export function toClaudeAgent(
 	name: string,
 	text: string,
 	stateRoot: string,
-	claudeHome: string,
 ): string | undefined {
 	const { keys, body } = splitFrontmatter(text);
 	if (get(keys, "exclude_extensions")?.includes("builtin:mcp")) return undefined;
@@ -128,12 +124,12 @@ export function toClaudeAgent(
 	const lines = ["---", `name: ${name}`, `description: ${description}`];
 	if (tools.length > 0) lines.push(`tools: ${tools.join(", ")}`);
 	lines.push("---", "");
-	lines.push(claudePaths(body, stateRoot, claudeHome));
+	lines.push(claudePaths(body, stateRoot));
 	return lines.join("\n");
 }
 
 /** A pi prompt file as a Claude Code command file. The `description` carries; the rest is body. */
-export function toClaudeCommand(name: string, text: string, stateRoot: string, claudeHome: string): string {
+export function toClaudeCommand(name: string, text: string, stateRoot: string): string {
 	const { keys, body } = splitFrontmatter(text);
 	const lines = ["---"];
 	const description = get(keys, "description");
@@ -141,7 +137,7 @@ export function toClaudeCommand(name: string, text: string, stateRoot: string, c
 	const hint = get(keys, "argument-hint");
 	if (hint) lines.push(`argument-hint: ${hint}`);
 	lines.push("---", "");
-	lines.push(claudePaths(body, stateRoot, claudeHome));
+	lines.push(claudePaths(body, stateRoot));
 	return lines.join("\n");
 }
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -17,6 +17,19 @@ function manager(root, ...args) {
 	return { code: result.status, out: result.stdout, err: result.stderr };
 }
 
+/** The manager as normally invoked, plus a managed home pair. */
+function managerWithHomes(pi, claude) {
+	const env = { ...process.env, AGENT_PI_HOME: pi, AGENT_CLAUDE_HOME: claude };
+	delete env.AGENT_STATE_TEST;
+	return (root, ...args) => {
+		const result = spawnSync("python3", ["-I", MANAGER, ...args], {
+			env: { ...env, AGENT_STATE_DIR: root },
+			encoding: "utf8",
+		});
+		return { code: result.status, out: result.stdout, err: result.stderr };
+	};
+}
+
 /** A minimal state tree: the two shared halves the manager reads. */
 function fixture() {
 	const root = mkdtempSync(join(tmpdir(), "agent-state-"));
@@ -30,6 +43,11 @@ function fixture() {
 		"# Contract\n\nRead the playbooks.\n\n| Tool | Load it when | Never when |\n|---|---|---|\n| `example` | always | never |\n",
 	);
 	writeFileSync(join(root, "hosts", "pi", "AGENTS.append.md"), "# Pi only\n");
+	mkdirSync(join(root, "shared", "prompts"), { recursive: true });
+	writeFileSync(
+		join(root, "shared", "prompts", "duo.md"),
+		"---\ndescription: Pair up\n---\n\nRead `{{AGENT_STATE}}/rig/.rig/playbooks/workflow.md`.\n",
+	);
 	writeFileSync(join(root, "hosts", "pi", "settings.json"), "{}\n");
 	writeFileSync(join(root, "shared", "skills", "example", "SKILL.md"), "---\nname: example\n---\n");
 	git(root, "init", "-q", "-b", "main");
@@ -181,6 +199,174 @@ test("pull refuses a dirty tree and fast-forwards a clean one", () => {
 	} catch (error) {
 		rmSync(origin, { recursive: true, force: true });
 		throw error;
+	}
+});
+
+test("a rendered file names a target that exists on this machine", () => {
+	const root = fixture();
+	const pi = mkdtempSync(join(tmpdir(), "agent-pi-"));
+	const claude = mkdtempSync(join(tmpdir(), "agent-claude-"));
+	process.env.AGENT_PI_HOME = pi;
+	process.env.AGENT_CLAUDE_HOME = claude;
+	try {
+			writeFileSync(join(root, "config.json"), '{"hosts": ["pi", "claude"]}\n');
+		mkdirSync(join(root, "rig", ".rig", "playbooks"), { recursive: true });
+		writeFileSync(join(root, "rig", ".rig", "playbooks", "workflow.md"), "# Workflow\n");
+		writeFileSync(
+			join(root, "shared", "AGENTS.md"),
+			"# Contract\n\nRead `{{AGENT_STATE}}/rig/.rig/playbooks/workflow.md`.\n",
+		);
+		mkdirSync(join(root, "shared", "agents"), { recursive: true });
+		writeFileSync(
+			join(root, "shared", "agents", "worker.md"),
+			"---\ndescription: worker\ntools: read\n---\n\nRead `{{AGENT_STATE}}/rig/.rig/playbooks/workflow.md`.\n",
+		);
+		git(root, "add", "-A");
+		git(root, "commit", "-qm", "chore: target");
+		const result = manager(root, "sync");
+		assert.equal(result.code, 0, result.err);
+		for (const text of [
+			readFileSync(join(pi, "AGENTS.md"), "utf8"),
+			readFileSync(join(pi, "agents", "worker.md"), "utf8"),
+			readFileSync(join(pi, "prompts", "duo.md"), "utf8"),
+			readFileSync(join(pi, "skills", "example", "SKILL.md"), "utf8"),
+			readFileSync(join(claude, "CLAUDE.md"), "utf8"),
+			readFileSync(join(claude, "agents", "worker.md"), "utf8"),
+			readFileSync(join(claude, "commands", "duo.md"), "utf8"),
+		]) {
+			for (const [, target] of text.matchAll(/`(\/[^`]+)`/g)) {
+				assert.ok(existsSync(target), `${target} is named by a rendered file but does not exist`);
+			}
+		}
+
+	} finally {
+		delete process.env.AGENT_PI_HOME;
+		delete process.env.AGENT_CLAUDE_HOME;
+		rmSync(root, { recursive: true, force: true });
+		rmSync(pi, { recursive: true, force: true });
+		rmSync(claude, { recursive: true, force: true });
+	}
+});
+
+test("AGENT_STATE_HOSTS limits a render to the configured host", () => {
+	const root = fixture();
+	const pi = mkdtempSync(join(tmpdir(), "agent-pi-"));
+	const claude = mkdtempSync(join(tmpdir(), "agent-claude-"));
+	const run = managerWithHomes(pi, claude);
+	try {
+		let result = spawnSync("python3", ["-I", MANAGER, "sync"], {
+			env: {
+				...process.env,
+				AGENT_STATE_DIR: root,
+				AGENT_PI_HOME: pi,
+				AGENT_CLAUDE_HOME: claude,
+				AGENT_STATE_HOSTS: "claude",
+				AGENT_STATE_TEST: "1",
+			},
+			encoding: "utf8",
+		});
+		assert.equal(result.status, 0, result.stderr);
+		assert.deepEqual(readdirSync(pi), [], "an unconfigured home stays empty");
+		assert.ok(existsSync(join(claude, "CLAUDE.md")));
+
+		// The tracked key, with no override, is the default source.
+		writeFileSync(join(root, "config.json"), '{"hosts": ["pi"]}\n');
+		rmSync(claude, { recursive: true, force: true });
+		rmSync(pi, { recursive: true, force: true });
+		mkdirSync(pi);
+		mkdirSync(claude);
+		result = run(root, "sync");
+		assert.equal(result.code, 0, result.err);
+		assert.deepEqual(readdirSync(claude), [], "a pi-only machine renders no Claude home");
+		assert.ok(existsSync(join(pi, "AGENTS.md")));
+		assert.match(result.out, /into: pi\./);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+		rmSync(pi, { recursive: true, force: true });
+		rmSync(claude, { recursive: true, force: true });
+	}
+});
+
+test("a malformed or mis-shaped config.json is one error line, not a traceback", () => {
+	const root = fixture();
+	const pi = mkdtempSync(join(tmpdir(), "agent-pi-"));
+	const claude = mkdtempSync(join(tmpdir(), "agent-claude-"));
+	try {
+		for (const [body, message] of [
+			['{"hosts": ["pi"],}\n', /not valid JSON/],
+			['{"hosts": "claude"}\n', /non-empty list/],
+			['{"hosts": []}\n', /non-empty list/],
+			['{"hosts": ["smoke"]}\n', /Unknown host/],
+		]) {
+			writeFileSync(join(root, "config.json"), body);
+			for (const verb of ["sync", "check"]) {
+				const { code, err } = manager(root, verb);
+				assert.equal(code, 1, `${verb}: ${body}`);
+				assert.match(err, message);
+				assert.doesNotMatch(err, /Traceback/);
+			}
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+		rmSync(pi, { recursive: true, force: true });
+		rmSync(claude, { recursive: true, force: true });
+	}
+});
+
+test("check stays silent about a host this machine does not render", () => {
+	const root = fixture();
+	const pi = mkdtempSync(join(tmpdir(), "agent-pi-"));
+	const claude = mkdtempSync(join(tmpdir(), "agent-claude-"));
+	process.env.AGENT_PI_HOME = pi;
+	process.env.AGENT_CLAUDE_HOME = claude;
+	process.env.AGENT_STATE_HOSTS = "claude";
+	try {
+		assert.equal(manager(root, "sync").code, 0);
+		// A pi home from before the machine was configured Claude-only.
+		mkdirSync(pi, { recursive: true });
+		writeFileSync(join(pi, "AGENTS.md"), "# stale\n");
+		const result = manager(root, "check");
+		assert.equal(result.code, 0, result.out);
+		assert.doesNotMatch(result.out, /pi/);
+	} finally {
+		delete process.env.AGENT_PI_HOME;
+		delete process.env.AGENT_CLAUDE_HOME;
+		delete process.env.AGENT_STATE_HOSTS;
+		rmSync(root, { recursive: true, force: true });
+		rmSync(pi, { recursive: true, force: true });
+		rmSync(claude, { recursive: true, force: true });
+	}
+});
+
+test("AGENT_STATE_TEST refuses to render a home it was not handed", () => {
+	const root = fixture();
+	const pi = mkdtempSync(join(tmpdir(), "agent-pi-"));
+	const claude = mkdtempSync(join(tmpdir(), "agent-claude-"));
+	const env = { ...process.env, AGENT_STATE_DIR: root, AGENT_STATE_TEST: "1" };
+	delete env.AGENT_PI_HOME;
+	delete env.AGENT_CLAUDE_HOME;
+	delete env.AGENT_STATE_HOSTS;
+	try {
+		writeFileSync(join(root, "config.json"), '{"hosts": ["claude"]}\n');
+		let result = spawnSync("python3", ["-I", MANAGER, "sync"], {
+			env: { ...env, AGENT_PI_HOME: pi },
+			encoding: "utf8",
+		});
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /AGENT_CLAUDE_HOME/);
+		assert.deepEqual(readdirSync(pi), []);
+
+		writeFileSync(join(root, "config.json"), '{"hosts": ["pi"]}\n');
+		result = spawnSync("python3", ["-I", MANAGER, "sync"], {
+			env: { ...env, AGENT_PI_HOME: pi },
+			encoding: "utf8",
+		});
+		assert.equal(result.status, 0, result.stderr);
+		assert.ok(existsSync(join(pi, "AGENTS.md")), "the configured host still renders");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+		rmSync(pi, { recursive: true, force: true });
+		rmSync(claude, { recursive: true, force: true });
 	}
 });
 

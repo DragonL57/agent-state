@@ -14,11 +14,15 @@ The repository is larger than either host home: it carries the tooling, tests, t
 2. `PI_STATE_DIR`, then `PI_CODING_AGENT_DIR`, for the pi extension;
 3. `~/agent-state`, the shared fallback: the pi extension's last resort and the Claude plugin's commands and hook.
 
-Rendering writes *into* the host homes and never reads them back. A rendered file is derived: hand edits to `~/.claude/CLAUDE.md` or the pi `AGENTS.md` are lost on the next `sync`, and `check` reports exactly that drift so the hook can name it.
+Rendering writes *into* the host homes and never reads them back. A rendered file is derived: hand edits to `~/.claude/CLAUDE.md` or the pi `AGENTS.md` are lost on the next `sync`, and `check` reports exactly that drift so the hook can name it. Rendered text may name the clone, because the clone is the one place every machine has the content, and it is the same path on a pi-only machine and a Claude-only one.
+
+## Which hosts a machine renders
+
+A machine may run both hosts, either, or the other. `sync` and `pull` render the hosts named in `config.json`'s `hosts` key, or in `AGENT_STATE_HOSTS` (comma-separated), which wins over the file. With neither, they render both. A host outside that list is skipped, and `check` stays silent about it, so a Claude-only machine never grows a `~/.pi/agent`, and the reverse.
 
 ## `{{AGENT_STATE}}`
 
-One token, two resolutions. Shared files may not name a host path: `{{AGENT_STATE}}/AGENTS.md` becomes the pi home for pi and `~/.claude` for Claude. The Claude renderer passes shared agent bodies through the same substitution, so an agent's "read the contract" line points at the right file on both sides.
+One token, one resolution. Shared files may not name a host path: `{{AGENT_STATE}}` becomes the clone root on both hosts, so `{{AGENT_STATE}}/rig/.rig/playbooks/workflow.md` is a file the clone holds. The clone is the right target because it is where playbooks, prompts, skills and `tools/state.py` live, and it is the same path on every machine. A host home holds only rendered output, and only the files this machine's `hosts` config asks for. Both renderers resolve the token the same way: `tools/state.py`'s `rewrite_paths` and `extensions/pi-state/translate.ts`'s `claudePaths`. The Claude renderer passes shared agent bodies through that substitution, so an agent's "read the playbook" line points at a file that exists on both sides.
 
 ## Command boundaries
 
@@ -26,8 +30,8 @@ One token, two resolutions. Shared files may not name a host path: `{{AGENT_STAT
 - `snapshot` validates, stages, and commits locally. It refuses root host-only names and literal secrets in any tracked JSON file.
 - `pull` requires a clean tree and accepts fast-forward updates only, then renders.
 - `push` uploads existing commits without creating or changing one.
-- `sync` renders without touching Git.
-- `check` prints findings and exits 1, but exits 0 outside a checkout so a session hook can never block.
+- `sync` renders the configured hosts without touching Git.
+- `check` prints findings and exits 1, but exits 0 outside a checkout so a session hook can never block. It reports the configured hosts only.
 
 No command performs both commit and push. No lifecycle hook writes to Git or fetches into the user's checkout.
 

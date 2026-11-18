@@ -9,11 +9,11 @@ const GIT_TIMEOUT_MS = 60_000;
 /**
  * The pi half of agent-state.
  *
- * One clone per host: the checkout lives at AGENT_STATE_DIR (by default the pi
- * home itself, as the upstream package did), and the manager renders the homes
- * from it. The manager in tools/state.py does the work for both hosts; this
- * extension only resolves the verbs and shows the result, so neither host can
- * drift from the other.
+ * One clone per machine, beside the homes, and the manager renders the
+ * configured homes from it (it refuses a clone inside a home it renders). The
+ * manager in tools/state.py does the work for both hosts; this extension only
+ * resolves the verbs and shows the result, so neither host can drift from the
+ * other.
  */
 export default function agentStateExtension(pi: ExtensionAPI) {
 	async function manager(action: string, rest: string): Promise<string> {

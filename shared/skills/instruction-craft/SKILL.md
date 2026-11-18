@@ -183,8 +183,8 @@ Ask in this order. Stop at the first yes.
    and only if no other line already says it.
 3. Does an existing skill own the topic? Then extend that skill.
 4. Does it need a trigger no existing skill claims? Then a new skill.
-5. Does it run on demand, once, with arguments? Then a prompt template in
-   `{{AGENT_STATE}}/prompts/`.
+5. Does it run on demand, once, with arguments? Then a prompt template in the
+   harness home's `prompts/` directory.
 
 ### Put a tool where it fires
 
