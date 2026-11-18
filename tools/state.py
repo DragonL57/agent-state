@@ -78,6 +78,12 @@ HOST_ONLY = (
 SHARED = Path("shared")
 PI = Path("hosts/pi")
 CLAUDE = Path("hosts/claude")
+# A host-only name there is the tracked portable subset, rendered into the
+# home's own file: a host's credentials are never tracked, but its command
+# wiring is.
+SETTINGS = "settings.json"
+STATUSLINE = "statusline.sh"
+STATUSLINE_SOURCE = Path("shared/statusline/claude.sh")
 
 
 def _bind(root: Path) -> None:
@@ -278,6 +284,44 @@ def claude_agent(root: Path, path: Path, claude_home: Path) -> str | None:
     return "\n".join(lines)
 
 
+def claude_settings_sync(root: Path, home: Path, mode: str = "write") -> str:
+    """The tracked subset merged into the home's own settings file.
+
+    The home's file holds the host's choices, and the render owns the keys the
+    subset names. A file that is not an object is refused rather than replaced:
+    it holds the user's configuration. `mode="probe"` answers which path the
+    render would change, or "" when the file already matches.
+    """
+    tracked = CLAUDE / SETTINGS
+    if not tracked.exists():
+        return ""
+    try:
+        subset = json.loads(rewrite_paths(tracked.read_text(), root))
+    except json.JSONDecodeError as error:
+        raise StateError(f"{tracked} is not valid JSON ({error}).")
+    if not isinstance(subset, dict):
+        raise StateError(f"{tracked} is not a JSON object. Fix the tracked subset.")
+    target = home / SETTINGS
+    current: dict = {}
+    if target.exists():
+        try:
+            current = json.loads(target.read_text())
+        except json.JSONDecodeError as error:
+            raise StateError(f"{target} is not valid JSON ({error}). Fix it before sync.")
+        if not isinstance(current, dict):
+            raise StateError(f"{target} is not a JSON object. Fix it before sync.")
+    status_line = subset.get("statusLine")
+    if isinstance(status_line, dict):
+        status_line["command"] = str(root / STATUSLINE_SOURCE)
+    merged = {**current, **subset}
+    if merged == current:
+        return ""
+    if mode == "write":
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(merged, indent=2) + "\n")
+    return str(target)
+
+
 def claude_contract(root: Path, claude_home: Path) -> str:
     """The whole contract, with the state path pointing at the clone.
 
@@ -432,6 +476,16 @@ def render_home(root: Path, host: str) -> list[str]:
         (home / "output-styles").mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, home / "output-styles" / src.name)
         written.append(str(home / "output-styles" / src.name))
+    script = root / STATUSLINE_SOURCE
+    if script.exists():
+        target = home / STATUSLINE
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(script, target)
+        target.chmod(0o755)
+        written.append(str(target))
+    settings = claude_settings_sync(root, home)
+    if settings:
+        written.append(settings)
     return written
 
 
@@ -455,6 +509,14 @@ def drift(root: Path) -> list[tuple[str, str]]:
             expected = claude_agent(root, src, home)
             target = home / "agents" / src.name
             if expected is not None and target.exists() and target.read_text() != expected:
+                findings.append(("claude", str(target)))
+        stale_settings = claude_settings_sync(root, home, mode="probe")
+        if stale_settings:
+            findings.append(("claude", stale_settings))
+        script = root / STATUSLINE_SOURCE
+        if script.exists():
+            target = home / STATUSLINE
+            if not target.exists() or target.read_text() != script.read_text() or not (target.stat().st_mode & 0o111):
                 findings.append(("claude", str(target)))
     return findings
 
@@ -569,8 +631,9 @@ def main(argv: list[str]) -> int:
         try:
             text = cmd_check(root)
         except StateError as error:
-            print(f"agent-state: {error}", file=sys.stderr)
-            return 1
+            # A hook never blocks a session, so an unrenderable configuration
+            # is one finding line.
+            text = f"agent-state: {error}"
         if text:
             print(text, file=sys.stderr if args.json else sys.stdout)
         return 1 if text else 0

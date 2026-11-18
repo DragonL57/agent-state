@@ -319,10 +319,11 @@ test("a malformed or mis-shaped config.json is one error line, not a traceback",
 		]) {
 			writeFileSync(join(root, "config.json"), body);
 			for (const verb of ["sync", "check"]) {
-				const { code, err } = manager(root, verb);
+				const { code, out, err } = manager(root, verb);
 				assert.equal(code, 1, `${verb}: ${body}`);
-				assert.match(err, message);
-				assert.doesNotMatch(err, /Traceback/);
+				// `check` reports findings on stdout, so its config error rides there.
+				assert.match(verb === "check" ? out : err, message);
+				assert.doesNotMatch(out + err, /Traceback/);
 			}
 		}
 	} finally {

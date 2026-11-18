@@ -10,7 +10,7 @@ One repository, `DragonL57/agent-state`, checked out on every machine at `~/agen
 ## The two halves
 
 - **Shared, tracked, maintained for both hosts.** `shared/`: `AGENTS.md`, `agents/`, `playbooks/`, `prompts/`, `skills/`. These are written once in a harness-neutral voice and rendered per host.
-- **Host-only, never tracked.** Credentials and runtime state: `auth.json`, `trust.json`, `models-store.json`, `.env`, sessions, package caches, and each host's own `settings.json`. `tools/state.py` refuses to stage any of them, and the `.gitignore` keeps them out of `git status` noise.
+- **Host-only, never tracked.** Credentials and runtime state: `auth.json`, `trust.json`, `models-store.json`, `.env`, sessions, package caches, and each host's own `settings.json`. `tools/state.py` refuses to stage any of them, and the `.gitignore` keeps them out of `git status` noise. A host's tracked `hosts/<host>/settings.json` is the portable subset, merged into the home's file; keep credentials out of it, since the repository is public.
 
 ## Daily workflow, identical on both hosts
 
@@ -32,6 +32,7 @@ No command commits and pushes together. `pull` is fast-forward only and refuses 
 - **Agents.** `shared/agents/*.md` become Claude agent files with capitalised tools (`write` grants `Write, Edit`), `thinking`/`exclude_extensions` dropped, and every `{{AGENT_STATE}}` path pointing at the clone. Claude agents carry **no** `model:` or `effort:` so they inherit the session's.
 - **Prompts** become `~/.claude/commands/*.md`, keeping `description` and `argument-hint`.
 - **Skills** are symlinked into `~/.claude/skills/`, except the pi-only ones (`pi-state-sync`).
+- **Status line.** `shared/statusline/claude.sh` becomes `~/.claude/statusline.sh`, executable. `hosts/claude/settings.json` holds only the `statusLine` key, merged into the home's own file; every other key in that file stays put, and a hand-set `statusLine` is replaced on the next `sync`.
 
 ## Do not
 

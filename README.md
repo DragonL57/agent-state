@@ -2,7 +2,7 @@
 
 Git-backed configuration for **two agent hosts**: [pi](https://pi.dev) and [Claude Code](https://claude.com/claude-code).
 
-One repository holds the contract, agents, playbooks, prompts, skills and rig kit. Each machine keeps one clone and renders the homes of the hosts it runs: pi into its agent home (`AGENTS.md`, `agents/`, `prompts/`, `skills/`, `settings.json`), Claude Code into `~/.claude` (`CLAUDE.md`, `agents/`, `commands/`, `skills/`) plus the Claude plugin. A machine that runs one host renders one home. A change is written once, on either host, and the others pick it up with their own `pull`.
+One repository holds the contract, agents, playbooks, prompts, skills and rig kit. Each machine keeps one clone and renders the homes of the hosts it runs: pi into its agent home (`AGENTS.md`, `agents/`, `prompts/`, `skills/`, `settings.json`), Claude Code into `~/.claude` (`CLAUDE.md`, `agents/`, `commands/`, `skills/`, `statusline.sh`, the `statusLine` key in `settings.json`) plus the Claude plugin. A machine that runs one host renders one home. A change is written once, on either host, and the others pick it up with their own `pull`.
 
 ## Quick start
 
@@ -111,8 +111,10 @@ shared/              the source of truth for both hosts
   playbooks/         the rig playbooks
   prompts/           slash commands (/duo exists on both hosts)
   skills/            SKILL.md trees
+  statusline/        the Claude Code status line, rendered to ~/.claude/statusline.sh
 hosts/pi/            pi-only: AGENTS.append.md, the portable settings.json subset
-hosts/claude/        Claude-only: output styles
+hosts/claude/        Claude-only: output styles, the portable settings.json subset
+                     (the tracked statusLine key, merged into the home's file)
 rig/                 the rig kit (agents, skills, installers, bench tests)
 plugin/              the Claude Code plugin (commands, hooks)
 extensions/pi-state/ the pi extension: an /agent-state command over the manager
@@ -131,6 +133,8 @@ tools/state.py       the manager both hosts call
 | `description:`, folded | `name:` added, description folded to one line |
 | `prompts/*.md` | `commands/*.md` (description and `argument-hint` carry) |
 | skill directories | symlinked into `~/.claude/skills/`; every skill is shared, so both hosts receive the same set |
+| `shared/statusline/claude.sh` | copied to `~/.claude/statusline.sh`, executable |
+| `hosts/claude/settings.json` | its keys merged into `~/.claude/settings.json`; every other key stays |
 
 ## Daily workflow
 

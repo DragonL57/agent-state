@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### TASK-2 Render the Claude Code status line from the tracked tree
+
+- The status line is one tracked script, `shared/statusline/claude.sh`, rendered to `~/.claude/statusline.sh` and made executable. It prints one row: directory, branch, model, effort, and the context bar with its max size.
+- `hosts/claude/settings.json` is the Claude portable subset, holding only the `statusLine` key. `sync` merges it into `~/.claude/settings.json` and leaves the owner's other keys alone; a home file that is not a JSON object is refused.
+- The render owns the `statusLine` key whole: a hand-set one is replaced on `sync`. `check` names a Claude `settings.json` that lost or changed the key, and a missing or non-executable `statusline.sh`.
+- The script reads its fields through `jq`, then `STATUSLINE_JQ` and `STATUSLINE_PY` pick a different reader when a machine or a test needs one. Its Python fallback runs with `-I`.
+
 ### TASK-1 Render each host's home correctly
 
 - `{{AGENT_STATE}}` resolves to the clone in both renderers (`tools/state.py`'s `rewrite_paths`, `extensions/pi-state/translate.ts`'s `claudePaths`). Rendered files named a home that held none of the content: ten paths were missing on pi and eleven on Claude Code.

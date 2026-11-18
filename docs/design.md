@@ -22,7 +22,17 @@ A machine may run both hosts, either, or the other. `sync` and `pull` render the
 
 ## `{{AGENT_STATE}}`
 
-One token, one resolution. Shared files may not name a host path: `{{AGENT_STATE}}` becomes the clone root on both hosts, so `{{AGENT_STATE}}/rig/.rig/playbooks/workflow.md` is a file the clone holds. The clone is the right target because it is where playbooks, prompts, skills and `tools/state.py` live, and it is the same path on every machine. A host home holds only rendered output, and only the files this machine's `hosts` config asks for. Both renderers resolve the token the same way: `tools/state.py`'s `rewrite_paths` and `extensions/pi-state/translate.ts`'s `claudePaths`. The Claude renderer passes shared agent bodies through that substitution, so an agent's "read the playbook" line points at a file that exists on both sides.
+One token, one resolution. Shared files may not name a host path: `{{AGENT_STATE}}` becomes the clone root on both hosts, so `{{AGENT_STATE}}/rig/.rig/playbooks/workflow.md` is a file the clone holds. The clone is the right target because it is where playbooks, prompts, skills and `tools/state.py` live, and it is the same path on every machine. A host home holds only rendered output, and only the files this machine's `hosts` config asks for. Both renderers resolve the token the same way: `tools/state.py`'s `rewrite_paths` (the renderer's, and the one `claude_settings_sync` applies to the tracked subset) and `extensions/pi-state/translate.ts`'s `claudePaths`. The Claude renderer passes shared agent bodies through that substitution, so an agent's "read the playbook" line points at a file that exists on both sides.
+
+## The tracked settings subset
+
+A host's own `settings.json` holds credentials and runtime state, so it stays out of Git and `snapshot` refuses it at the root of a render. The tracked `hosts/<host>/settings.json` is the portable subset, and each host renders it in its own file format: the pi render copies the subset over the home's file whole (`render_home`, the pi branch), and Claude merges the keys it names.
+
+Claude merges only the keys the tracked subset names. `hosts/claude/settings.json` carries the `statusLine` key and nothing else, so a render puts that key into `~/.claude/settings.json` and leaves every other key where the owner put it. The render owns that key whole: a hand-set `statusLine` in the home is replaced on the next `sync`, and `check` names the difference before that.
+
+Claude refuses a home file that is not a JSON object. Replacing it would lose the owner's configuration.
+
+The status line lives in the clone and renders to the home. `shared/statusline/claude.sh` copies to `~/.claude/statusline.sh` with the exec bit set. The render sets the home's command to `{clone}/shared/statusline/claude.sh`, so the source is what runs, and a clone that moved shows up as drift.
 
 ## Command boundaries
 
@@ -31,7 +41,7 @@ One token, one resolution. Shared files may not name a host path: `{{AGENT_STATE
 - `pull` requires a clean tree and accepts fast-forward updates only, then renders.
 - `push` uploads existing commits without creating or changing one.
 - `sync` renders the configured hosts without touching Git.
-- `check` prints findings and exits 1, but exits 0 outside a checkout so a session hook can never block. It reports the configured hosts only.
+- `check` prints findings and exits 1, but exits 0 outside a checkout so a session hook can never block. It reports the configured hosts only, including a Claude `settings.json` that lost or changed a key the subset names and a missing or non-executable `statusline.sh`.
 
 No command performs both commit and push. No lifecycle hook writes to Git or fetches into the user's checkout.
 

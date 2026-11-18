@@ -141,9 +141,6 @@ export function toClaudeCommand(name: string, text: string, stateRoot: string): 
 	return lines.join("\n");
 }
 
-/** Every portable pi key worth carrying into a Claude settings file. */
-export const PORTABLE_SETTINGS_KEYS = ["outputStyle", "enabledPlugins", "extraKnownMarketplaces", "theme"] as const;
-
 /** The tracked tree's names, for the drift report. */
 export function listFiles(dir: string, suffix = ""): string[] {
 	if (!existsSync(dir)) return [];
