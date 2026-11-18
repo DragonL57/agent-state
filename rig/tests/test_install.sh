@@ -1,0 +1,1407 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
+
+# The kit's helpers, named once. agents_pinned are the specialists the installer
+# pins a model for; agents_all adds the unpinned fallback runner.
+agents_pinned="implementer taste-reviewer spec-reviewer uiux-reviewer docs-reviewer test-reviewer final-reviewer"
+agents_all="$agents_pinned fallback-runner"
+
+# The installer ships every agents/*.md by glob, so a file the lists above miss
+# would install everywhere while these tests stayed green. The lists keep the
+# order the picker reads; the files have to match them exactly.
+for agent_file in "$repo_dir"/agents/*.md; do
+    agent_name="$(basename "$agent_file" .md)"
+    case " $agents_all " in
+        *" $agent_name "*) ;;
+        *)
+            echo "FAIL: agents/$agent_name.md ships without being declared in agents_all" >&2
+            exit 1
+            ;;
+    esac
+done
+shipped_count="$(find "$repo_dir/agents" -name '*.md' | wc -l | tr -d ' ')"
+declared_count="$(printf '%s\n' $agents_all | wc -l | tr -d ' ')"
+if [ "$shipped_count" -ne "$declared_count" ]; then
+    echo "FAIL: agents/ ships $shipped_count agent files, agents_all declares $declared_count" >&2
+    exit 1
+fi
+
+# The kit ships the runtime-verification skill with the driver it tells the
+# reader to copy, so a fresh install can produce runtime evidence.
+if [ ! -f "$repo_dir/.agents/skills/verify-app/SKILL.md" ] \
+    || [ ! -f "$repo_dir/.agents/skills/verify-app/assets/drive.py" ]; then
+    echo "FAIL: the kit ships verify-app without SKILL.md or assets/drive.py" >&2
+    exit 1
+fi
+
+# The Rig-owned part of an AGENTS.md: everything above the project marker.
+# An agent file as the kit ships it: the installed copy differs only by the
+# model and thinking lines the installer pins in.
+agent_without_pin() {
+    grep -v -e '^model: ' -e '^thinking: ' "$1"
+}
+core_agents() {
+    awk '/<!-- Project-specific/ || /<!-- rig:/ || /<!-- BACKLOG.MD GUIDELINES/ { exit } { print }' "$1" \
+        | sed -e :a -e '/^$/{$d;N;ba' -e '}'
+}
+copy_kit() {
+    local destination="$1"
+    mkdir -p "$destination"
+    cp \
+        "$repo_dir/AGENTS.md" \
+        "$repo_dir/check-update" \
+        "$repo_dir/harnesses.sh" \
+        "$repo_dir/install.sh" \
+        "$repo_dir/models.sh" \
+        "$destination/"
+    cp -R "$repo_dir/agents" "$repo_dir/.rig" "$repo_dir/.agents" "$destination/"
+}
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+
+mkdir -p "$tmp_dir/bin" "$tmp_dir/home"
+export HOME="$tmp_dir/home"
+cat > "$tmp_dir/bin/curl" <<'EOF'
+#!/bin/sh
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = "-o" ]; then
+        printf '%s\n' 'fake grilling skill' > "$2"
+        exit 0
+    fi
+    shift
+done
+exit 1
+EOF
+cat > "$tmp_dir/bin/pi" <<'EOF'
+#!/bin/sh
+if [ "$1" = "--list-models" ]; then
+    echo 'provider      model'
+    echo 'openai-codex  gpt-5.6-terra'
+    echo 'openai-codex  gpt-5.6-sol'
+    echo 'openai-codex  gpt-6-astra'
+    echo 'openai-codex  gpt-6-sol'
+    echo 'openai-codex  gpt-6.1-sol'
+    echo 'openai-codex  gpt-6.1-terra'
+    echo 'openai-codex  gpt-6-luna'
+    echo 'ollama-cloud  deepseek-v4.1-flash'
+    echo 'anthropic     claude-opus-5-5'
+    echo 'ollama-cloud  deepseek-v4-flash:0731'
+    echo 'ollama-cloud  glm-5.2'
+    echo 'ollama-cloud  glm-5.3'
+    echo 'ollama-cloud  kimi-k3'
+    echo 'anthropic     claude-opus-5'
+    echo 'anthropic     claude-sonnet-5'
+    echo 'anthropic     claude-sonnet-5-5'
+fi
+exit 0
+EOF
+cat > "$tmp_dir/bin/backlog" <<'STUB'
+#!/bin/sh
+mkdir -p backlog/tasks
+grep -q "BACKLOG.MD GUIDELINES" AGENTS.md 2>/dev/null || cat >> AGENTS.md <<'BLOCK'
+
+<!-- BACKLOG.MD GUIDELINES START -->
+stub guidelines
+<!-- BACKLOG.MD GUIDELINES END -->
+BLOCK
+exit 0
+STUB
+chmod +x "$tmp_dir/bin/curl" "$tmp_dir/bin/pi" "$tmp_dir/bin/backlog"
+mkdir -p "$tmp_dir/emptybin" "$tmp_dir/backlogbin"
+cp "$tmp_dir/bin/backlog" "$tmp_dir/backlogbin/backlog"
+export PATH="$tmp_dir/bin:$PATH"
+python_bin="$(command -v python3)"
+
+# The deployed scripts cannot share these helpers, so their implementations
+# must remain identical. Comment-only changes do not count as drift.
+"$python_bin" - "$repo_dir/install.sh" "$repo_dir/check-update" <<'PY'
+import re
+import sys
+
+
+def function_definition(source, name):
+    pattern = rb"(?ms)^" + re.escape(name.encode()) + rb"\(\) \{\n.*?^\}\n"
+    match = re.search(pattern, source)
+    if match is None:
+        raise SystemExit(f"FAIL: missing {name} definition")
+    return b"".join(
+        line
+        for line in match.group().splitlines(keepends=True)
+        if not line.lstrip().startswith(b"#")
+    )
+
+
+with open(sys.argv[1], "rb") as file:
+    installer = file.read()
+with open(sys.argv[2], "rb") as file:
+    checker = file.read()
+
+for name in ("is_valid_revision", "normalize_revision", "resolve_main_revision"):
+    if function_definition(installer, name) != function_definition(checker, name):
+        raise SystemExit(f"FAIL: {name} differs between install.sh and check-update")
+PY
+
+cat > "$tmp_dir/snapshot-tree.py" <<'PY'
+import hashlib
+import json
+import os
+import stat
+import sys
+
+root = sys.argv[1]
+entries = []
+for directory, directories, files in os.walk(root, followlinks=False):
+    for name in sorted(directories + files):
+        path = os.path.join(directory, name)
+        info = os.lstat(path)
+        entry = {
+            "path": os.path.relpath(path, root),
+            "mode": stat.S_IMODE(info.st_mode),
+        }
+        if stat.S_ISLNK(info.st_mode):
+            entry["type"] = "symlink"
+            entry["target"] = os.readlink(path)
+        elif stat.S_ISREG(info.st_mode):
+            entry["type"] = "file"
+            with open(path, "rb") as file:
+                entry["sha256"] = hashlib.sha256(file.read()).hexdigest()
+        elif stat.S_ISDIR(info.st_mode):
+            entry["type"] = "directory"
+        else:
+            entry["type"] = "other"
+        entries.append(entry)
+print(json.dumps(sorted(entries, key=lambda entry: entry["path"]), sort_keys=True))
+PY
+snapshot_tree() {
+    "$python_bin" "$tmp_dir/snapshot-tree.py" "$1"
+}
+kit_revision="$(git -C "$repo_dir" rev-parse HEAD | tr '[:upper:]' '[:lower:]')"
+
+fresh_target="$tmp_dir/fresh"
+mkdir "$fresh_target"
+bash "$repo_dir/install.sh" "$fresh_target" --no-input > "$tmp_dir/fresh.out"
+
+# Current operator routing must win even when older models remain available.
+grep -qx 'model: openai-codex/gpt-6.1-sol' "$fresh_target/.pi/agents/implementer.md"
+grep -qx 'thinking: medium' "$fresh_target/.pi/agents/implementer.md"
+for agent in taste-reviewer spec-reviewer docs-reviewer; do
+    grep -qx 'model: openai-codex/gpt-6.1-terra' "$fresh_target/.pi/agents/$agent.md"
+done
+grep -qx 'thinking: medium' "$fresh_target/.pi/agents/taste-reviewer.md"
+grep -qx 'thinking: medium' "$fresh_target/.pi/agents/spec-reviewer.md"
+grep -qx 'thinking: low' "$fresh_target/.pi/agents/docs-reviewer.md"
+grep -qx 'model: openai-codex/gpt-6.1-terra' "$fresh_target/.pi/agents/uiux-reviewer.md"
+grep -qx 'thinking: medium' "$fresh_target/.pi/agents/uiux-reviewer.md"
+grep -qx 'model: openai-codex/gpt-6.1-sol' "$fresh_target/.pi/agents/test-reviewer.md"
+grep -qx 'thinking: high' "$fresh_target/.pi/agents/test-reviewer.md"
+grep -qx 'model: openai-codex/gpt-6.1-sol' "$fresh_target/.pi/agents/final-reviewer.md"
+grep -qx 'thinking: max' "$fresh_target/.pi/agents/final-reviewer.md"
+
+diff -q <(core_agents "$repo_dir/AGENTS.md") <(core_agents "$fresh_target/AGENTS.md") > /dev/null
+grep -qxF '## Corrections' "$fresh_target/AGENTS.md"
+grep -qF 'BACKLOG.MD GUIDELINES START' "$fresh_target/AGENTS.md"
+grep -qF 'verify-app' "$fresh_target/AGENTS.md" || {
+    echo "FAIL: the installed AGENTS.md no longer routes runtime evidence to verify-app" >&2
+    exit 1
+}
+[ -d "$fresh_target/backlog" ]
+for agent in $agents_all; do
+    diff -q <(agent_without_pin "$repo_dir/agents/$agent.md") \
+        <(agent_without_pin "$fresh_target/.pi/agents/$agent.md") > /dev/null
+done
+if grep -q '^model: ' "$fresh_target/.pi/agents/fallback-runner.md"; then
+    echo "FAIL: fresh fallback-runner has a model pin" >&2
+    exit 1
+fi
+
+# Interface review needs MCP to drive a browser, so it declares extensions and
+# carries no exclude_extensions line in its frontmatter, the block the installer
+# reads. The tool list below omits the writers this test names: `read` and `bash`
+# can still write through a shell and `codemode` runs JavaScript, so what it
+# proves is that the named writer tools are absent, not that the agent is
+# read-only.
+grep -qxF 'extensions: pi-mcp-adapter, builtin:codemode' "$fresh_target/.pi/agents/uiux-reviewer.md"
+if awk '/^---$/ { fences++ } fences < 2 { print }' "$fresh_target/.pi/agents/uiux-reviewer.md" \
+    | grep -q '^exclude_extensions:'
+then
+    echo "FAIL: uiux-reviewer drops MCP through exclude_extensions" >&2
+    exit 1
+fi
+uiux_tools="$(awk -F': *' '/^tools:/ { print $2; exit }' "$fresh_target/.pi/agents/uiux-reviewer.md" | tr -d ' ')"
+case "$uiux_tools" in
+    *write*|*replace*|*insert*)
+        echo "FAIL: uiux-reviewer names a writing tool: $uiux_tools" >&2
+        exit 1
+        ;;
+esac
+# Skill and prompt wording guards: the prompt has to keep naming the skill it reads
+# marker it writes on an unchecked claim. They prove nothing about behaviour.
+grep -qF 'apple-design' "$fresh_target/.pi/agents/uiux-reviewer.md" || {
+    echo "FAIL: uiux-reviewer no longer names the apple-design skill" >&2
+    exit 1
+}
+grep -qF 'UNVERIFIED' "$fresh_target/.pi/agents/uiux-reviewer.md" || {
+    echo "FAIL: uiux-reviewer no longer marks unchecked claims UNVERIFIED" >&2
+    exit 1
+}
+[ ! -e "$fresh_target/.rig/merge" ]
+diff -r "$repo_dir/.rig/playbooks" "$fresh_target/.rig/playbooks" > /dev/null
+diff -r "$repo_dir/.agents/skills" "$fresh_target/.agents/skills" > /dev/null
+
+# The shipped verify-app is self-contained: it names no path into the author's
+# own pi state and no talk the reader never saw.
+if [ ! -f "$fresh_target/.agents/skills/verify-app/SKILL.md" ] \
+    || [ ! -f "$fresh_target/.agents/skills/verify-app/assets/drive.py" ]; then
+    echo "FAIL: the installed verify-app is missing SKILL.md or assets/drive.py" >&2
+    exit 1
+fi
+if grep -rqF -e '~/.pi/agent' -e 'the talk' "$fresh_target/.agents/skills/verify-app"; then
+    echo "FAIL: the installed verify-app points outside the project" >&2
+    exit 1
+fi
+# Review-step wording guards: a repeated defect routes to a check, the final reviewer
+# asks for one check per shared cause, the review step is not skippable, and the
+# orchestrator never reviews its own change in place of the reviewers.
+grep -qF 'makes the class impossible' "$fresh_target/.rig/playbooks/reviewing.md" || {
+    echo "FAIL: reviewing.md no longer routes a repeated defect to a check" >&2
+    exit 1
+}
+grep -qF 'Every step that applies runs' "$fresh_target/.rig/playbooks/workflow.md" || {
+    echo "FAIL: workflow.md no longer requires every step that applies" >&2
+    exit 1
+}
+grep -qF 'Every step that applies runs' "$fresh_target/.rig/playbooks/review.md" || {
+    echo "FAIL: review.md no longer requires every step that applies" >&2
+    exit 1
+}
+grep -qF 'A delegated change takes the review step' "$fresh_target/.rig/playbooks/workflow.md" || {
+    echo "FAIL: workflow.md no longer says a delegated change takes the review step" >&2
+    exit 1
+}
+grep -qF 'A delegated change takes the review step' "$fresh_target/.rig/playbooks/review.md" || {
+    echo "FAIL: review.md no longer says a delegated change takes the review step" >&2
+    exit 1
+}
+grep -qF 'is reported as a defect in the run' "$fresh_target/.rig/playbooks/workflow.md" || {
+    echo "FAIL: workflow.md no longer reports a change whose review step did not run as a defect in the run" >&2
+    exit 1
+}
+grep -qF 'is reported as a defect in the run' "$fresh_target/.rig/playbooks/review.md" || {
+    echo "FAIL: review.md no longer reports a change whose review step did not run as a defect in the run" >&2
+    exit 1
+}
+grep -qF 'Do not ask the user whether to review' "$fresh_target/.rig/playbooks/workflow.md" || {
+    echo "FAIL: workflow.md no longer forbids asking the user whether to review" >&2
+    exit 1
+}
+grep -qF 'Do not ask the user whether to review' "$fresh_target/.rig/playbooks/review.md" || {
+    echo "FAIL: review.md no longer forbids asking the user whether to review" >&2
+    exit 1
+}
+grep -qF 'The work you do yourself is not the review step' "$fresh_target/.rig/playbooks/workflow.md" || {
+    echo "FAIL: workflow.md no longer says work done in place of a reviewer is not the review step" >&2
+    exit 1
+}
+grep -qF 'and the review still counts' "$fresh_target/.rig/playbooks/review.md" || {
+    echo "FAIL: review.md no longer says a substituted review still counts" >&2
+    exit 1
+}
+grep -qF 'never reviews its own change' "$fresh_target/.rig/playbooks/review.md" || {
+    echo "FAIL: review.md no longer forbids the orchestrator reviewing its own change" >&2
+    exit 1
+}
+grep -qF 'share a cause' "$fresh_target/.pi/agents/final-reviewer.md" || {
+    echo "FAIL: final-reviewer.md no longer asks for one check per shared cause" >&2
+    exit 1
+}
+[ ! -e "$fresh_target/.rig/snippets" ]
+[ ! -e "$fresh_target/.claude/skills" ]
+cat > "$tmp_dir/expected-install.json" <<EOF
+{
+  "repository": "https://github.com/DragonL57/rig",
+  "revision": "$kit_revision"
+}
+EOF
+cmp -s "$tmp_dir/expected-install.json" "$fresh_target/.rig/install.json"
+cmp -s "$repo_dir/check-update" "$fresh_target/.rig/check-update"
+[ -x "$fresh_target/.rig/check-update" ]
+grep -F "Rig kit revision — ${kit_revision:0:7}" "$tmp_dir/fresh.out" > /dev/null
+grep -F ".rig/install.json" "$tmp_dir/fresh.out" > /dev/null
+grep -F ".rig/check-update" "$tmp_dir/fresh.out" > /dev/null
+
+# A failed run after the core files have begun must not replace prior provenance.
+mkdir "$tmp_dir/failing-bin"
+cat > "$tmp_dir/failing-bin/pi" <<'STUB'
+#!/bin/sh
+if [ "$1" = "--list-models" ]; then
+    printf '%s\n' 'provider      model' 'openai-codex  gpt-5.6-terra'
+    exit 0
+fi
+[ "$1" = install ] && exit 1
+exit 0
+STUB
+chmod +x "$tmp_dir/failing-bin/pi"
+failed_target="$tmp_dir/failed"
+mkdir -p "$failed_target/.rig"
+printf 'old manifest\n' > "$failed_target/.rig/install.json"
+printf 'old checker\n' > "$failed_target/.rig/check-update"
+chmod 640 "$failed_target/.rig/install.json"
+chmod 700 "$failed_target/.rig/check-update"
+cp "$failed_target/.rig/install.json" "$tmp_dir/sentinel-install.json"
+cp "$failed_target/.rig/check-update" "$tmp_dir/sentinel-check-update"
+if env PATH="$tmp_dir/failing-bin:$tmp_dir/bin:$PATH" \
+    bash "$repo_dir/install.sh" "$failed_target" --no-input > "$tmp_dir/failed.out" 2>&1
+then
+    echo "FAIL: installer unexpectedly succeeded after pi install failure" >&2
+    exit 1
+fi
+[ -f "$failed_target/AGENTS.md" ]
+cmp -s "$tmp_dir/sentinel-install.json" "$failed_target/.rig/install.json"
+cmp -s "$tmp_dir/sentinel-check-update" "$failed_target/.rig/check-update"
+"$python_bin" - "$failed_target/.rig/install.json" "$failed_target/.rig/check-update" <<'PY'
+import os
+import stat
+import sys
+
+if stat.S_IMODE(os.stat(sys.argv[1]).st_mode) != 0o640:
+    raise SystemExit("install.json mode changed after failed install")
+if stat.S_IMODE(os.stat(sys.argv[2]).st_mode) != 0o700:
+    raise SystemExit("check-update mode changed after failed install")
+PY
+
+# Installing the kit into itself keeps its playbook and skill sources.
+self_kit="$tmp_dir/self-kit"
+copy_kit "$self_kit"
+mkdir "$self_kit/backlog"
+bash "$self_kit/install.sh" "$self_kit" --no-input > "$tmp_dir/self.out"
+diff -r "$repo_dir/.rig/playbooks" "$self_kit/.rig/playbooks" > /dev/null
+diff -r "$repo_dir/.agents/skills" "$self_kit/.agents/skills" > /dev/null
+
+# The kit's own Corrections rows stay in the kit: a fresh install gets the
+# table header only.
+row_kit="$tmp_dir/row-kit"
+copy_kit "$row_kit"
+"$python_bin" - "$row_kit/AGENTS.md" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path).read()
+text = text.replace("|---|---|\n", "|---|---|\n| Kit-only correction. | prose |\n", 1)
+open(path, "w").write(text)
+PY
+grep -qF 'Kit-only correction.' "$row_kit/AGENTS.md"
+row_target="$tmp_dir/row-target"
+mkdir "$row_target"
+bash "$row_kit/install.sh" "$row_target" --no-input > "$tmp_dir/row.out"
+grep -qxF '| Rule | Enforced by |' "$row_target/AGENTS.md"
+if grep -qF 'Kit-only correction.' "$row_target/AGENTS.md"; then
+    echo "FAIL: the kit's Corrections rows reached a fresh install" >&2
+    exit 1
+fi
+
+# A copied kit is still installable, but it has no checkout HEAD to record.
+non_git_kit="$tmp_dir/non-git-kit"
+copy_kit "$non_git_kit"
+non_git_target="$tmp_dir/non-git"
+mkdir "$non_git_target"
+bash "$non_git_kit/install.sh" "$non_git_target" --no-input > "$tmp_dir/non-git.out"
+cat > "$tmp_dir/unknown-install.json" <<'EOF'
+{
+  "repository": "https://github.com/DragonL57/rig",
+  "revision": null
+}
+EOF
+cmp -s "$tmp_dir/unknown-install.json" "$non_git_target/.rig/install.json"
+grep -F "Rig kit revision — unknown" "$tmp_dir/non-git.out" > /dev/null
+
+# A curl-piped install records the commit it resolved and fetches that exact
+# archive. When the API is unavailable, it keeps the branch archive fallback.
+remote_sha="1234567890abcdef1234567890abcdef12345678"
+remote_newer_sha="1234567000000000000000000000000000000000"
+archive_source="$tmp_dir/archive-source"
+copy_kit "$archive_source/rig"
+tar -czf "$tmp_dir/rig.tar.gz" -C "$archive_source" rig
+mkdir "$tmp_dir/remote-bin"
+cat > "$tmp_dir/remote-bin/curl" <<'STUB'
+#!/bin/sh
+output=""
+url=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -o)
+            output="$2"
+            shift 2
+            ;;
+        *)
+            url="$1"
+            shift
+            ;;
+    esac
+done
+if [ -n "$output" ]; then
+    printf '%s\n' 'fake skill' > "$output"
+    exit 0
+fi
+printf '%s\n' "$url" >> "$REMOTE_LOG"
+case "$url" in
+    *api.github.com/repos/DragonL57/rig/git/ref/heads/main)
+        [ "${REMOTE_API_MODE:-ok}" = fail ] && exit 1
+        if [ -n "${REMOTE_API_RESPONSE:-}" ]; then
+            printf '%s\n' "$REMOTE_API_RESPONSE"
+        else
+            printf '{"object":{"sha":"%s"}}\n' "$REMOTE_SHA"
+        fi
+        ;;
+    *codeload.github.com/DragonL57/rig/tar.gz/*)
+        cat "$REMOTE_ARCHIVE"
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+STUB
+chmod +x "$tmp_dir/remote-bin/curl"
+remote_target="$tmp_dir/remote"
+mkdir "$remote_target"
+: > "$tmp_dir/remote.log"
+/bin/cat "$repo_dir/install.sh" | env \
+    PATH="$tmp_dir/remote-bin:$PATH" \
+    REMOTE_ARCHIVE="$tmp_dir/rig.tar.gz" \
+    REMOTE_LOG="$tmp_dir/remote.log" \
+    REMOTE_SHA="$remote_sha" \
+    bash -s -- "$remote_target" --no-input > "$tmp_dir/remote.out"
+cat > "$tmp_dir/remote-install.json" <<EOF
+{
+  "repository": "https://github.com/DragonL57/rig",
+  "revision": "$remote_sha"
+}
+EOF
+cmp -s "$tmp_dir/remote-install.json" "$remote_target/.rig/install.json"
+grep -F "codeload.github.com/DragonL57/rig/tar.gz/$remote_sha" "$tmp_dir/remote.log" > /dev/null
+
+remote_fallback_target="$tmp_dir/remote-fallback"
+mkdir "$remote_fallback_target"
+: > "$tmp_dir/remote-fallback.log"
+/bin/cat "$repo_dir/install.sh" | env \
+    PATH="$tmp_dir/remote-bin:$PATH" \
+    REMOTE_API_MODE=fail \
+    REMOTE_ARCHIVE="$tmp_dir/rig.tar.gz" \
+    REMOTE_LOG="$tmp_dir/remote-fallback.log" \
+    REMOTE_SHA="$remote_sha" \
+    bash -s -- "$remote_fallback_target" --no-input > "$tmp_dir/remote-fallback.out"
+cmp -s "$tmp_dir/unknown-install.json" "$remote_fallback_target/.rig/install.json"
+grep -F "codeload.github.com/DragonL57/rig/tar.gz/refs/heads/main" \
+    "$tmp_dir/remote-fallback.log" > /dev/null
+
+remote_malformed_target="$tmp_dir/remote-malformed"
+mkdir "$remote_malformed_target"
+: > "$tmp_dir/remote-malformed.log"
+/bin/cat "$repo_dir/install.sh" | env \
+    PATH="$tmp_dir/remote-bin:$PATH" \
+    REMOTE_API_RESPONSE='{"object":{"sha":"not-a-revision"}}' \
+    REMOTE_ARCHIVE="$tmp_dir/rig.tar.gz" \
+    REMOTE_LOG="$tmp_dir/remote-malformed.log" \
+    REMOTE_SHA="$remote_sha" \
+    bash -s -- "$remote_malformed_target" --no-input > "$tmp_dir/remote-malformed.out"
+cmp -s "$tmp_dir/unknown-install.json" "$remote_malformed_target/.rig/install.json"
+grep -F "codeload.github.com/DragonL57/rig/tar.gz/refs/heads/main" \
+    "$tmp_dir/remote-malformed.log" > /dev/null
+
+# The installed checker reports its three stable statuses and never changes
+# the target tree, even when the network response is unusable.
+checker="$remote_target/.rig/check-update"
+cp "$remote_target/.rig/install.json" "$tmp_dir/checker-manifest-before"
+run_checker() {
+    local api_mode="$1" api_response="$2" expected_exit="$3" output="$4" status
+    if env PATH="$tmp_dir/remote-bin:$PATH" \
+        REMOTE_ARCHIVE="$tmp_dir/rig.tar.gz" \
+        REMOTE_LOG="$tmp_dir/checker.log" \
+        REMOTE_SHA="$remote_sha" \
+        REMOTE_API_MODE="$api_mode" \
+        REMOTE_API_RESPONSE="$api_response" \
+        "$checker" > "$output"; then
+        status=0
+    else
+        status=$?
+    fi
+    if [ "$status" != "$expected_exit" ]; then
+        echo "FAIL: checker exited $status, expected $expected_exit" >&2
+        exit 1
+    fi
+}
+check_tree_unchanged() {
+    snapshot_tree "$remote_target" > "$tmp_dir/checker-tree-before.json"
+    run_checker "$@"
+    snapshot_tree "$remote_target" > "$tmp_dir/checker-tree-after.json"
+    cmp -s "$tmp_dir/checker-tree-before.json" "$tmp_dir/checker-tree-after.json"
+}
+: > "$tmp_dir/checker.log"
+check_tree_unchanged ok "" 0 "$tmp_dir/checker-current.out"
+grep -F "Rig is current: installed ${remote_sha:0:7}, upstream ${remote_sha:0:7}." \
+    "$tmp_dir/checker-current.out" > /dev/null
+cmp -s "$tmp_dir/checker-manifest-before" "$remote_target/.rig/install.json"
+
+check_tree_unchanged ok "{\"object\":{\"sha\":\"$remote_newer_sha\"}}" 1 "$tmp_dir/checker-update.out"
+grep -F "Rig update available: installed ${remote_sha:0:7}, upstream ${remote_newer_sha:0:7}." \
+    "$tmp_dir/checker-update.out" > /dev/null
+grep -F "https://github.com/DragonL57/rig/compare/$remote_sha...$remote_newer_sha" \
+    "$tmp_dir/checker-update.out" > /dev/null
+cmp -s "$tmp_dir/checker-manifest-before" "$remote_target/.rig/install.json"
+
+check_tree_unchanged fail "" 2 "$tmp_dir/checker-offline.out"
+grep -F "Rig update status unknown:" "$tmp_dir/checker-offline.out" > /dev/null
+cmp -s "$tmp_dir/checker-manifest-before" "$remote_target/.rig/install.json"
+
+run_checker ok '{"object":{"sha":"not-a-revision"}}' 2 "$tmp_dir/checker-malformed.out"
+grep -F "Rig update status unknown:" "$tmp_dir/checker-malformed.out" > /dev/null
+cmp -s "$tmp_dir/checker-manifest-before" "$remote_target/.rig/install.json"
+
+sed '$d' "$tmp_dir/checker-manifest-before" > "$remote_target/.rig/install.json"
+run_checker ok "" 2 "$tmp_dir/checker-broken-manifest.out"
+grep -F "Rig update status unknown:" "$tmp_dir/checker-broken-manifest.out" > /dev/null
+cmp -s <(sed '$d' "$tmp_dir/checker-manifest-before") "$remote_target/.rig/install.json"
+
+cp "$tmp_dir/unknown-install.json" "$remote_target/.rig/install.json"
+run_checker ok "" 2 "$tmp_dir/checker-null.out"
+grep -F "Rig update status unknown:" "$tmp_dir/checker-null.out" > /dev/null
+cmp -s "$tmp_dir/unknown-install.json" "$remote_target/.rig/install.json"
+
+# A later successful local run replaces Rig-owned provenance exactly.
+printf 'old checker\n' > "$remote_target/.rig/check-update"
+chmod -x "$remote_target/.rig/check-update"
+bash "$repo_dir/install.sh" "$remote_target" --no-input > "$tmp_dir/remote-rerun.out"
+cmp -s "$tmp_dir/expected-install.json" "$remote_target/.rig/install.json"
+cmp -s "$repo_dir/check-update" "$remote_target/.rig/check-update"
+[ -x "$remote_target/.rig/check-update" ]
+
+merge_target="$tmp_dir/merge"
+mkdir -p "$merge_target/.pi/agents"
+printf '%s\n' 'existing project instructions' > "$merge_target/AGENTS.md"
+printf '%s\n' 'existing taste reviewer' > "$merge_target/.pi/agents/taste-reviewer.md"
+cp "$merge_target/AGENTS.md" "$tmp_dir/existing-AGENTS.md"
+cp "$merge_target/.pi/agents/taste-reviewer.md" "$tmp_dir/existing-taste-reviewer.md"
+
+bash "$repo_dir/install.sh" "$merge_target" --no-input > "$tmp_dir/merge.out"
+
+cmp -s "$tmp_dir/expected-install.json" "$merge_target/.rig/install.json"
+# Backlog appends its own block; the project's text stays as it was.
+[ "$(head -1 "$merge_target/AGENTS.md")" = 'existing project instructions' ]
+if grep -qxF '## Core standard' "$merge_target/AGENTS.md"; then
+    echo "FAIL: installer merged the core into an existing AGENTS.md" >&2
+    exit 1
+fi
+cmp -s "$tmp_dir/existing-taste-reviewer.md" "$merge_target/.pi/agents/taste-reviewer.md"
+diff -q <(core_agents "$repo_dir/AGENTS.md") <(core_agents "$merge_target/.rig/merge/AGENTS.md") > /dev/null
+diff -q <(agent_without_pin "$repo_dir/agents/taste-reviewer.md") \
+    <(agent_without_pin "$merge_target/.rig/merge/agents/taste-reviewer.md") > /dev/null
+grep -E "staged +$merge_target/.rig/merge/AGENTS.md for $merge_target/AGENTS.md" "$tmp_dir/merge.out" > /dev/null
+grep -E "staged +$merge_target/.rig/merge/agents/taste-reviewer.md for $merge_target/.pi/agents/taste-reviewer.md" "$tmp_dir/merge.out" > /dev/null
+
+cp "$merge_target/.rig/merge/AGENTS.md" "$merge_target/AGENTS.md"
+cp "$repo_dir/agents/taste-reviewer.md" "$merge_target/.pi/agents/taste-reviewer.md"
+bash "$repo_dir/install.sh" "$merge_target" --no-input > "$tmp_dir/resolved.out"
+[ ! -e "$merge_target/.rig/merge" ]
+grep -E "unchanged +$merge_target/AGENTS.md" "$tmp_dir/resolved.out" > /dev/null
+# Taking the kit's copy resolves the conflict; the installer then adds the
+# model pin, which is its own line to write.
+grep -E "updated +$merge_target/.pi/agents/taste-reviewer.md" "$tmp_dir/resolved.out" > /dev/null
+grep -q "^model: " "$merge_target/.pi/agents/taste-reviewer.md"
+
+# Backlog.md is required: without the command and without backlog/, the
+# installer stops before writing anything.
+no_backlog_target="$tmp_dir/no-backlog"
+mkdir "$no_backlog_target"
+if env PATH="$tmp_dir/emptybin:/usr/bin:/bin" \
+    bash "$repo_dir/install.sh" "$no_backlog_target" --no-input > "$tmp_dir/no-backlog.out" 2>&1
+then
+    echo "FAIL: installer ran without the backlog command" >&2
+    exit 1
+fi
+grep -F "npm i -g backlog.md" "$tmp_dir/no-backlog.out" > /dev/null
+[ -z "$(ls -A "$no_backlog_target")" ]
+mkdir "$no_backlog_target/backlog"
+if env PATH="$tmp_dir/emptybin:/usr/bin:/bin" \
+    bash "$repo_dir/install.sh" "$no_backlog_target" --no-input > "$tmp_dir/no-backlog2.out" 2>&1
+then
+    echo "FAIL: installer ran without the backlog command in a Backlog repository" >&2
+    exit 1
+fi
+[ "$(ls -A "$no_backlog_target")" = backlog ]
+
+grep -F "What you now have:" "$tmp_dir/fresh.out" > /dev/null
+[ ! -e "$fresh_target/FINDINGS.md" ]
+
+# An install from an earlier version: appended Rig sections, the old
+# snippets folder, and project rules. The update removes the sections and the
+# folder, keeps the project rules and Backlog's block, and stages the new core.
+legacy_target="$tmp_dir/legacy"
+mkdir -p "$legacy_target/.rig/snippets" "$legacy_target/backlog"
+printf '%s\n' 'old snippet' > "$legacy_target/.rig/snippets/session-continuity.md"
+cat > "$legacy_target/AGENTS.md" <<'LEGACY'
+# AGENTS.md
+
+## Core standard
+
+Old core rules.
+
+<!-- Project-specific sections go below this line. -->
+
+## Toolchain
+
+Run make check.
+
+<!-- BACKLOG.MD GUIDELINES START -->
+stub guidelines
+<!-- BACKLOG.MD GUIDELINES END -->
+
+<!-- rig:document-governance -->
+## Document governance
+
+Old governance.
+
+<!-- rig:session-continuity -->
+## Session continuity
+
+Old continuity.
+
+<!-- rig:parallel-agents -->
+## Parallel implementation
+
+### Foundations first, then parallel
+
+Old parallel notes.
+
+## Release checklist
+
+Tag before publishing.
+LEGACY
+bash "$repo_dir/install.sh" "$legacy_target" --no-input > "$tmp_dir/legacy.out"
+if grep -qF '<!-- rig:' "$legacy_target/AGENTS.md" \
+    || grep -qF 'Old governance.' "$legacy_target/AGENTS.md" \
+    || grep -qF 'Old continuity.' "$legacy_target/AGENTS.md" \
+    || grep -qF 'Old parallel notes.' "$legacy_target/AGENTS.md"
+then
+    echo "FAIL: appended Rig sections survived the update" >&2
+    exit 1
+fi
+grep -qxF 'Run make check.' "$legacy_target/AGENTS.md"
+grep -qxF 'Tag before publishing.' "$legacy_target/AGENTS.md"
+grep -qxF 'Old core rules.' "$legacy_target/AGENTS.md"
+[ "$(grep -c 'BACKLOG.MD GUIDELINES START' "$legacy_target/AGENTS.md")" = "1" ]
+[ ! -e "$legacy_target/.rig/snippets" ]
+diff -q <(core_agents "$repo_dir/AGENTS.md") <(core_agents "$legacy_target/.rig/merge/AGENTS.md") > /dev/null
+grep -E "removed +earlier appended Rig sections" "$tmp_dir/legacy.out" > /dev/null
+
+# Playbooks and session skills are Rig's: a re-run restores local edits.
+printf '%s\n' 'local edit' >> "$legacy_target/.rig/playbooks/testing.md"
+rm -rf "$legacy_target/.agents/skills/rig-pickup"
+bash "$repo_dir/install.sh" "$legacy_target" --no-input > "$tmp_dir/legacy2.out"
+diff -r "$repo_dir/.rig/playbooks" "$legacy_target/.rig/playbooks" > /dev/null
+diff -r "$repo_dir/.agents/skills" "$legacy_target/.agents/skills" > /dev/null
+
+# --yes sets up every editor; a re-run leaves an unchanged core alone.
+yes_target="$tmp_dir/yes"
+mkdir "$yes_target"
+bash "$repo_dir/install.sh" "$yes_target" --yes > "$tmp_dir/yes.out"
+diff -r "$repo_dir/.agents/skills" "$yes_target/.claude/skills" > /dev/null
+[ ! -e "$yes_target/FINDINGS.md" ]
+
+# Without a terminal, the installed editors are preselected. If only pi is
+# available, trailing unselected options must not make pick_many return 1 and
+# abort the installer under set -e.
+fallback_target="$tmp_dir/fallback"
+mkdir "$fallback_target"
+env PATH="$tmp_dir/bin:/usr/bin:/bin" \
+    bash "$repo_dir/install.sh" "$fallback_target" > "$tmp_dir/fallback.out"
+[ -f "$fallback_target/.pi/agents/implementer.md" ]
+[ ! -e "$fallback_target/.claude" ]
+[ ! -e "$fallback_target/.opencode" ]
+[ ! -e "$fallback_target/.codex" ]
+
+# Exercise the same case through a real pseudo-terminal: press Enter with only
+# pi preselected in the picker.
+cat > "$tmp_dir/drive_interactive.py" <<'PY'
+import os
+import pty
+import signal
+import sys
+
+signal.alarm(30)
+installer, target = sys.argv[1:]
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("bash", ["bash", installer, target], os.environ)
+
+data = b""
+for prompt, reply in [
+    (b"enter confirm", b"\r"),
+    (b"accept", b"\r"),
+]:
+    while prompt not in data:
+        data += os.read(fd, 65536)
+    os.write(fd, reply)
+
+try:
+    while os.read(fd, 65536):
+        pass
+except OSError:
+    pass
+_, status = os.waitpid(pid, 0)
+raise SystemExit(os.waitstatus_to_exitcode(status))
+PY
+
+interactive_target="$tmp_dir/interactive"
+mkdir "$interactive_target"
+git -C "$interactive_target" init -q
+env PATH="$tmp_dir/bin:/usr/bin:/bin" \
+    "$python_bin" "$tmp_dir/drive_interactive.py" "$repo_dir/install.sh" "$interactive_target"
+[ -f "$interactive_target/.pi/agents/implementer.md" ]
+[ ! -e "$interactive_target/.claude" ]
+
+# Downloaded npm packages stay local. Shareable pi config remains visible to
+# Git. Re-running must not duplicate the ignore rule.
+grep -qxF '.pi/npm/' "$interactive_target/.gitignore"
+mkdir -p "$interactive_target/.pi/npm"
+touch "$interactive_target/.pi/npm/package.json"
+git -C "$interactive_target" check-ignore -q .pi/npm/package.json
+if git -C "$interactive_target" check-ignore -q .pi/agents/implementer.md; then
+    echo "FAIL: Git ignores Pi agent configuration" >&2
+    exit 1
+fi
+if git -C "$interactive_target" check-ignore -q .pi/skills/grilling/SKILL.md; then
+    echo "FAIL: Git ignores the Pi grilling skill" >&2
+    exit 1
+fi
+if git -C "$interactive_target" check-ignore -q .pi/settings.json; then
+    echo "FAIL: Git ignores Pi settings" >&2
+    exit 1
+fi
+bash "$repo_dir/install.sh" "$interactive_target" --no-input > "$tmp_dir/interactive2.out"
+[ "$(grep -cxF '.pi/npm/' "$interactive_target/.gitignore")" = 1 ]
+
+# A tracked nested ignore file can still ignore .pi/npm/. Ask Git to evaluate
+# patterns independently of the index, so neither install adds a root rule.
+nested_ignore_target="$tmp_dir/nested-ignore"
+mkdir -p "$nested_ignore_target/.pi/npm"
+git -C "$nested_ignore_target" init -q
+printf '*\n' > "$nested_ignore_target/.pi/npm/.gitignore"
+git -C "$nested_ignore_target" add -f .pi/npm/.gitignore
+git -C "$nested_ignore_target" -c user.name=test -c user.email=test@example.com \
+    commit -qm 'tracked nested ignore fixture'
+if git -C "$nested_ignore_target" check-ignore -q .pi/npm/; then
+    echo "FAIL: tracked nested ignore fixture unexpectedly ignores .pi/npm/" >&2
+    exit 1
+fi
+git -C "$nested_ignore_target" check-ignore --no-index -q .pi/npm/
+bash "$repo_dir/install.sh" "$nested_ignore_target" --no-input > "$tmp_dir/nested-ignore.out"
+bash "$repo_dir/install.sh" "$nested_ignore_target" --no-input > "$tmp_dir/nested-ignore2.out"
+if [ -e "$nested_ignore_target/.gitignore" ] \
+    && grep -qxF '.pi/npm/' "$nested_ignore_target/.gitignore"
+then
+    echo "FAIL: nested ignore fixture added a root .pi/npm/ rule" >&2
+    exit 1
+fi
+
+# A broader existing rule also applies, so it remains the only ignore rule.
+broader_ignore_target="$tmp_dir/broader-ignore"
+mkdir "$broader_ignore_target"
+git -C "$broader_ignore_target" init -q
+printf '.pi/\n' > "$broader_ignore_target/.gitignore"
+bash "$repo_dir/install.sh" "$broader_ignore_target" --no-input > "$tmp_dir/broader-ignore.out"
+bash "$repo_dir/install.sh" "$broader_ignore_target" --no-input > "$tmp_dir/broader-ignore2.out"
+[ "$(grep -cxF '.pi/' "$broader_ignore_target/.gitignore")" = 1 ]
+if grep -qxF '.pi/npm/' "$broader_ignore_target/.gitignore"; then
+    echo "FAIL: broader ignore fixture added a narrower .pi/npm/ rule" >&2
+    exit 1
+fi
+
+# --yes also writes the agents for the other harnesses, from the same source.
+[ -f "$yes_target/.claude/agents/implementer.md" ]
+[ -f "$yes_target/.opencode/agent/implementer.md" ]
+grep -q "^name: implementer" "$yes_target/.claude/agents/implementer.md"
+grep -q "^mode: subagent" "$yes_target/.opencode/agent/taste-reviewer.md"
+[ -f "$yes_target/.codex/agents/implementer.toml" ]
+grep -q '^sandbox_mode = "read-only"' "$yes_target/.codex/agents/taste-reviewer.toml"
+grep -q '^sandbox_mode = "read-only"' "$yes_target/.codex/agents/docs-reviewer.toml"
+grep -q '^sandbox_mode = "read-only"' "$yes_target/.codex/agents/test-reviewer.toml"
+python3 -c "import tomllib,sys; [tomllib.load(open(f,'rb')) for f in sys.argv[1:]]" \
+    "$yes_target"/.codex/agents/*.toml
+# The body must survive translation unchanged.
+grep -q "You are the taste reviewer" "$yes_target/.claude/agents/taste-reviewer.md"
+grep -q "You are the test reviewer" "$yes_target/.claude/agents/test-reviewer.md"
+
+# codemode is a Pi built-in with no Claude Code equivalent, so the translated
+# tool list must not carry it.
+[ -f "$yes_target/.claude/agents/uiux-reviewer.md" ]
+if grep -q '^tools:.*codemode' "$yes_target/.claude/agents/uiux-reviewer.md"; then
+    echo "FAIL: Claude uiux-reviewer names codemode" >&2
+    exit 1
+fi
+
+[ -d "$yes_target/backlog" ]
+bash "$repo_dir/install.sh" "$yes_target" --yes > "$tmp_dir/yes2.out"
+[ "$(grep -c 'BACKLOG.MD GUIDELINES START' "$yes_target/AGENTS.md")" = "1" ]
+grep -E "unchanged +$yes_target/AGENTS.md" "$tmp_dir/yes2.out" > /dev/null
+[ ! -e "$yes_target/.rig/merge" ]
+
+# A grilling skill already in pi's global locations is reused, so the
+# project gets no copy of its own.
+global_home="$tmp_dir/global-home"
+mkdir -p "$global_home/.pi/agent/skills/grilling"
+printf '%s\n' 'global grilling' > "$global_home/.pi/agent/skills/grilling/SKILL.md"
+global_target="$tmp_dir/global"
+mkdir "$global_target"
+HOME="$global_home" bash "$repo_dir/install.sh" "$global_target" --yes > "$tmp_dir/global.out"
+[ ! -e "$global_target/.pi/skills/grilling" ]
+grep -F "grilling (global)" "$tmp_dir/global.out" > /dev/null
+
+
+# Each specialist carries a real model pin, in each harness's own format.
+# Without a pin the orchestrator spawns a specialist on its own model.
+pin_target="$tmp_dir/pins"
+mkdir "$pin_target"
+cat > "$tmp_dir/bin/opencode" <<'STUB'
+#!/bin/sh
+[ "$1" = models ] || exit 1
+printf '%s\n' openai/gpt-5.6-terra openai/gpt-5.6-sol opencode/gpt-6-sol opencode/gpt-6.1-sol opencode/gpt-6-luna openai/deepseek-v4-flash opencode/deepseek-v4.1-flash openai/claude-opus-5 opencode/claude-opus-5-5 opencode/gpt-6-astra
+STUB
+cat > "$tmp_dir/bin/codex" <<'STUB'
+#!/bin/sh
+exit 0
+STUB
+cat > "$tmp_dir/bin/claude" <<'STUB'
+#!/bin/sh
+exit 0
+STUB
+chmod +x "$tmp_dir/bin/opencode" "$tmp_dir/bin/codex" "$tmp_dir/bin/claude"
+pin_home="$tmp_dir/pin-home"
+mkdir -p "$pin_home/.codex"
+cat > "$pin_home/.codex/models_cache.json" <<'JSON'
+{"models": [{"slug": "gpt-5.6-sol"}, {"slug": "gpt-5.6-terra"}, {"slug": "gpt-6-astra"}, {"slug": "gpt-6-sol"}, {"slug": "gpt-6.1-sol"}, {"slug": "gpt-6-luna"}, {"slug": "codex-auto-review"}]}
+JSON
+HOME="$pin_home" bash "$repo_dir/install.sh" "$pin_target" --yes > "$tmp_dir/pins.out"
+
+# All eight agents ship everywhere. The seven specialists retain their resolved pins.
+for agent in $agents_all; do
+    [ -f "$pin_target/.pi/agents/$agent.md" ]
+    [ -f "$pin_target/.claude/agents/$agent.md" ]
+    [ -f "$pin_target/.opencode/agent/$agent.md" ]
+    [ -f "$pin_target/.codex/agents/$agent.toml" ]
+done
+for agent in $agents_pinned; do
+    grep -q "^model: " "$pin_target/.pi/agents/$agent.md"
+    grep -q "^model: " "$pin_target/.claude/agents/$agent.md"
+    grep -q "^model: " "$pin_target/.opencode/agent/$agent.md"
+    grep -q "^model = " "$pin_target/.codex/agents/$agent.toml"
+done
+if grep -q '^model: ' "$pin_target/.pi/agents/fallback-runner.md"; then
+    echo "FAIL: Pi fallback-runner has a model pin" >&2
+    exit 1
+fi
+if grep -q '^model: ' "$pin_target/.claude/agents/fallback-runner.md"; then
+    echo "FAIL: Claude fallback-runner has a model pin" >&2
+    exit 1
+fi
+if grep -q '^model: ' "$pin_target/.opencode/agent/fallback-runner.md"; then
+    echo "FAIL: opencode fallback-runner has a model pin" >&2
+    exit 1
+fi
+if grep -q '^model = ' "$pin_target/.codex/agents/fallback-runner.toml"; then
+    echo "FAIL: Codex fallback-runner has a model pin" >&2
+    exit 1
+fi
+grep -q '^  write: false' "$pin_target/.opencode/agent/fallback-runner.md"
+grep -q '^  edit: false' "$pin_target/.opencode/agent/fallback-runner.md"
+grep -q '^sandbox_mode = "read-only"' "$pin_target/.codex/agents/fallback-runner.toml"
+# Test review has the same inspection-only boundary in every harness.
+grep -qx 'thinking: high' "$pin_target/.pi/agents/test-reviewer.md"
+# The launch call owns the budget, so no Pi agent may pin one, and every agent
+# may name only a tool the kit allows. pi ignores an unknown name silently, so
+# the list is checked in both directions. codemode runs JavaScript, so only
+# uiux-reviewer may name it.
+for file in "$pin_target"/.pi/agents/*.md; do
+    agent="$(basename "$file" .md)"
+    if grep -q '^max_turns:' "$file"; then
+        echo "FAIL: Pi $agent pins max_turns" >&2
+        exit 1
+    fi
+    tools="$(awk -F': *' '/^tools:/ { print $2; exit }' "$file" | tr -d ' ')"
+    if [ -z "$tools" ] || [ "$tools" = all ]; then
+        echo "FAIL: Pi $agent grants every tool" >&2
+        exit 1
+    fi
+    for token in $(printf '%s' "$tools" | tr ',' ' '); do
+        case "$token" in
+            read|bash|write|replace|replace_match|insert) ;;
+            codemode)
+                if [ "$agent" != uiux-reviewer ]; then
+                    echo "FAIL: Pi $agent may not name codemode" >&2
+                    exit 1
+                fi
+                ;;
+            *)
+                echo "FAIL: Pi $agent names a tool the kit does not allow: $token" >&2
+                exit 1
+                ;;
+        esac
+    done
+done
+# The implementer gets git through bash, so the ban has to be in its prompt.
+# Two fragments, because the ban is a list and one fragment would survive a
+# sentence trimmed down to "Never commit".
+grep -q 'Never commit' "$pin_target/.pi/agents/implementer.md" || {
+    echo "FAIL: the implementer prompt lost its git ban" >&2
+    exit 1
+}
+grep -q 'push' "$pin_target/.pi/agents/implementer.md" || {
+    echo "FAIL: the implementer prompt no longer bans push" >&2
+    exit 1
+}
+# Every tool name the kit may use survives the Claude translation, and a
+# declared editing tool keeps its agent out of a read-only sandbox.
+. "$repo_dir/harnesses.sh"
+[ "$(claude_tools 'read, bash, write')" = 'Bash,Edit,Read,Write' ] || {
+    echo "FAIL: claude_tools does not turn write into Write and Edit" >&2
+    exit 1
+}
+[ "$(claude_tools 'read, replace')" = 'Edit,Read' ] || {
+    echo "FAIL: claude_tools does not turn replace into Edit" >&2
+    exit 1
+}
+[ "$(claude_tools 'read, grep, find, ls, bash')" = 'Bash,Glob,Grep,Read' ] || {
+    echo "FAIL: claude_tools mangles read, grep, find, ls, bash" >&2
+    exit 1
+}
+probe="$(mktemp)"
+printf -- '---\ntools: read, replace\n---\n' > "$probe"
+agent_can_write "$probe" || {
+    echo "FAIL: an agent declaring replace is treated as read-only" >&2
+    rm -f "$probe"
+    exit 1
+}
+printf -- '---\ntools: read, bash\n---\n' > "$probe"
+if agent_can_write "$probe"; then
+    echo "FAIL: an agent declaring only read and bash is treated as a writer" >&2
+    rm -f "$probe"
+    exit 1
+fi
+rm -f "$probe"
+grep -qx 'tools: Bash,Read' "$pin_target/.claude/agents/test-reviewer.md"
+# The implementer writes files, so no harness may hand it a read-only sandbox.
+if grep -q '^sandbox_mode = "read-only"' "$pin_target/.codex/agents/implementer.toml"; then
+    echo "FAIL: Codex implementer cannot write" >&2
+    exit 1
+fi
+if grep -q '^  write: false' "$pin_target/.opencode/agent/implementer.md"; then
+    echo "FAIL: opencode implementer cannot write" >&2
+    exit 1
+fi
+grep -qx 'tools: Bash,Edit,Read,Write' "$pin_target/.claude/agents/implementer.md"
+grep -q '^  write: false' "$pin_target/.opencode/agent/test-reviewer.md"
+grep -q '^  edit: false' "$pin_target/.opencode/agent/test-reviewer.md"
+grep -q '^sandbox_mode = "read-only"' "$pin_target/.codex/agents/test-reviewer.toml"
+for file in \
+    "$pin_target/.claude/agents/fallback-runner.md" \
+    "$pin_target/.opencode/agent/fallback-runner.md" \
+    "$pin_target/.codex/agents/fallback-runner.toml"
+do
+    grep -q "Execute the complete role and task specification supplied by the orchestrator exactly." "$file"
+done
+python3 -c "import tomllib,sys; [tomllib.load(open(f,'rb')) for f in sys.argv[1:]]" \
+    "$pin_target"/.codex/agents/*.toml
+
+# Current choices are resolved against each editor's available models.
+# Each harness takes the first model and effort pair its catalogue carries:
+# Terra where available, otherwise the next reviewer with its own effort.
+for agent in taste-reviewer spec-reviewer docs-reviewer; do
+    grep -qx 'model: openai-codex/gpt-6.1-terra' "$pin_target/.pi/agents/$agent.md"
+    grep -qx 'model: opencode/deepseek-v4.1-flash' "$pin_target/.opencode/agent/$agent.md"
+    grep -qx 'reasoningEffort: high' "$pin_target/.opencode/agent/$agent.md"
+    grep -qx 'model = "gpt-6-luna"' "$pin_target/.codex/agents/$agent.toml"
+    grep -qx 'model_reasoning_effort = "high"' "$pin_target/.codex/agents/$agent.toml"
+done
+grep -qx 'thinking: low' "$pin_target/.pi/agents/docs-reviewer.md"
+grep -qx 'thinking: medium' "$pin_target/.pi/agents/spec-reviewer.md"
+grep -qx 'model: opencode/gpt-6.1-sol' "$pin_target/.opencode/agent/implementer.md"
+grep -qx 'model: opencode/gpt-6.1-sol' "$pin_target/.opencode/agent/test-reviewer.md"
+grep -qx 'reasoningEffort: medium' "$pin_target/.opencode/agent/implementer.md"
+grep -qx 'reasoningEffort: high' "$pin_target/.opencode/agent/test-reviewer.md"
+for agent in implementer test-reviewer; do
+    grep -qx 'forceReasoning: true' "$pin_target/.opencode/agent/$agent.md"
+done
+grep -qx 'model: openai-codex/gpt-6.1-sol' "$pin_target/.pi/agents/test-reviewer.md"
+grep -qx 'model: openai-codex/gpt-6.1-sol' "$pin_target/.pi/agents/final-reviewer.md"
+grep -qx 'thinking: max' "$pin_target/.pi/agents/final-reviewer.md"
+grep -qx 'model: opencode/gpt-6.1-sol' "$pin_target/.opencode/agent/final-reviewer.md"
+grep -qx 'reasoningEffort: max' "$pin_target/.opencode/agent/final-reviewer.md"
+for agent in taste-reviewer spec-reviewer docs-reviewer fallback-runner; do
+    if grep -q '^forceReasoning:' "$pin_target/.opencode/agent/$agent.md"; then
+        echo "FAIL: OpenCode forceReasoning leaked into $agent" >&2
+        exit 1
+    fi
+done
+grep -qx 'model = "gpt-6.1-sol"' "$pin_target/.codex/agents/final-reviewer.toml"
+grep -qx 'model_reasoning_effort = "medium"' "$pin_target/.codex/agents/implementer.toml"
+grep -qx 'model_reasoning_effort = "high"' "$pin_target/.codex/agents/test-reviewer.toml"
+grep -qx 'model_reasoning_effort = "max"' "$pin_target/.codex/agents/final-reviewer.toml"
+grep -qx 'model = "gpt-6.1-sol"' "$pin_target/.codex/agents/implementer.toml"
+grep -qx 'model = "gpt-6.1-sol"' "$pin_target/.codex/agents/test-reviewer.toml"
+# Claude Code takes subscription aliases: Sonnet where others get Sol.
+grep -qx 'model: sonnet' "$pin_target/.claude/agents/implementer.md"
+grep -qx 'model: sonnet' "$pin_target/.claude/agents/test-reviewer.md"
+for agent in taste-reviewer spec-reviewer docs-reviewer final-reviewer; do
+    grep -qx 'model: opus' "$pin_target/.claude/agents/$agent.md"
+done
+grep -qx 'effort: medium' "$pin_target/.claude/agents/implementer.md"
+grep -qx 'effort: medium' "$pin_target/.claude/agents/final-reviewer.md"
+grep -qx 'effort: high' "$pin_target/.claude/agents/test-reviewer.md"
+if grep -q '^effort:' "$pin_target/.claude/agents/fallback-runner.md"; then
+    echo 'FAIL: unpinned Claude fallback-runner has an effort override' >&2
+    exit 1
+fi
+# Excluded recommendations are skipped even when the catalogue still lists them.
+. "$repo_dir/models.sh"
+excluded_catalog=$'gpt-5.6-terra\ngpt-5.6-sol\ngpt-5.6-luna\ngpt-5.6\ngpt-6-sol\nclaude-sonnet-5\nclaude-opus-5\ndeepseek-v4-flash:0731\ndeepseek-v4-flash\nglm-5.2\nkimi-k3'
+for agent in $(pinned_agents); do
+    if resolve_agent_choice "$excluded_catalog" "$agent" > /dev/null; then
+        echo "FAIL: $agent recommended an excluded model" >&2
+        exit 1
+    fi
+done
+[ "$(resolve_agent_choice $'openai/gpt-5.6-terra\nanthropic/claude-sonnet-5-5' implementer)" = 'anthropic/claude-sonnet-5-5 medium' ]
+[ "$(resolve_agent_choice $'ollama-cloud/deepseek-v4-flash:0731\nollama-cloud/glm-5.2\nollama-cloud/glm-5.3' taste-reviewer)" = 'ollama-cloud/glm-5.3 high' ]
+# Keep the operator's Kimi exception even when K3 is advertised by the catalogue.
+[ "$(resolve_agent_choice $'ollama-cloud/kimi-k3\nollama-cloud/kimi-k2.7-code\nollama-cloud/kimi-k2.6' spec-reviewer)" = 'ollama-cloud/kimi-k2.6 high' ]
+[ "$(resolve_agent_choice $'ollama-cloud/kimi-k3\nollama-cloud/kimi-k2.7-code' docs-reviewer)" = 'ollama-cloud/kimi-k2.7-code high' ]
+[ "$(resolve_agent_choice $'gpt-5.6-sol\ndeepseek-v4-pro:0813' test-reviewer)" = 'deepseek-v4-pro:0813 high' ]
+[ "$(resolve_agent_choice $'claude-opus-5\ngpt-6-astra' final-reviewer)" = 'gpt-6-astra medium' ]
+# The effort travels with the model: Terra docs review is low, its fallback high.
+[ "$(resolve_agent_choice $'openai/gpt-6.1-terra\nollama-cloud/deepseek-v4.1-flash' docs-reviewer)" = 'openai/gpt-6.1-terra low' ]
+[ "$(resolve_agent_choice $'ollama-cloud/deepseek-v4.1-flash' docs-reviewer)" = 'ollama-cloud/deepseek-v4.1-flash high' ]
+[ "$(resolve_agent_choice $'openai/gpt-6.1-sol\nanthropic/claude-opus-5-5' final-reviewer)" = 'openai/gpt-6.1-sol max' ]
+# GPT-6.1 Sol replaces GPT-6 Sol outright; Claude Code gets Sonnet in its place.
+[ "$(resolve_agent_choice $'openai/gpt-6-sol\nopenai/gpt-6.1-sol' implementer)" = 'openai/gpt-6.1-sol medium' ]
+if resolve_agent_choice $'openai/gpt-6-sol' implementer > /dev/null; then
+    echo "FAIL: GPT-6 Sol is still recommended" >&2
+    exit 1
+fi
+[ "$(resolve_agent_choice $'fable\nopus\nsonnet\nhaiku' implementer)" = 'sonnet medium' ]
+[ "$(resolve_agent_choice $'fable\nopus\nsonnet\nhaiku' test-reviewer)" = 'sonnet high' ]
+[ "$(resolve_agent_choice $'fable\nopus\nsonnet\nhaiku' final-reviewer)" = 'opus medium' ]
+[ "$(resolve_agent_choice $'fable\nopus\nsonnet\nhaiku' docs-reviewer)" = 'opus high' ]
+# A hosted review pipeline is not a model to pin.
+if grep -rq "codex-auto-review" "$pin_target/.codex/"; then
+    echo "FAIL: Codex output includes codex-auto-review" >&2
+    exit 1
+fi
+
+# The assignment is saved, and the matrix is printed once with everything else.
+[ -f "$pin_target/.rig/models.json" ]
+python3 - "$pin_target/.rig/models.json" "$agents_pinned" <<'JSON'
+import json, sys
+saved = json.load(open(sys.argv[1]))
+agents = set(sys.argv[2].split())
+assert all(set(entries) == agents for entries in saved.values()), saved
+assert saved["opencode"]["final-reviewer"] == {"model": "opencode/gpt-6.1-sol", "effort": "max"}
+assert saved["pi"]["docs-reviewer"] == {"model": "openai-codex/gpt-6.1-terra", "effort": "low"}
+assert saved["claude"]["final-reviewer"] == {"model": "opus", "effort": "medium"}
+JSON
+grep -F "Models each specialist will run on:" "$tmp_dir/pins.out" > /dev/null
+python3 - "$tmp_dir/pins.out" <<'PY'
+import re
+import sys
+
+ansi = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+lines = [ansi.sub("", line).rstrip("\n") for line in open(sys.argv[1])]
+start = next(
+    index for index, line in enumerate(lines)
+    if "Models each specialist will run on:" in line
+)
+rows = {}
+harness = None
+for line in lines[start + 1:]:
+    if line.strip().startswith("· "):
+        harness = line.strip()[2:]
+        continue
+    if harness is None or not line.strip():
+        if harness:
+            break
+        continue
+    name, rest = line.split(None, 1)
+    rows[(harness, name)] = rest.strip()
+expected = {
+    ("pi", "implementer"): "openai-codex/gpt-6.1-sol · medium",
+    ("pi", "taste-reviewer"): "openai-codex/gpt-6.1-terra · medium",
+    ("pi", "docs-reviewer"): "openai-codex/gpt-6.1-terra · low",
+    ("pi", "test-reviewer"): "openai-codex/gpt-6.1-sol · high",
+    ("pi", "final-reviewer"): "openai-codex/gpt-6.1-sol · max",
+}
+for key, value in expected.items():
+    if rows.get(key) != value:
+        raise SystemExit(f"unexpected model matrix row {key}: {rows.get(key)}")
+PY
+grep -F "fallback-runner has no default and requires a call-time model" "$tmp_dir/pins.out" > /dev/null
+
+# A legacy role-keyed file without test review migrates to per-agent entries:
+# reviewer expands to its three agents, the missing test model is resolved,
+# and every effort takes the kit default. The hand-edited uiux-reviewer entry
+# sits beside the role keys and has to survive the rewrite.
+cat > "$pin_target/.rig/models.json" <<'JSON'
+{"pi": {"implementer": "openai-codex/gpt-6.1-sol", "reviewer": "ollama-cloud/glm-5.3", "final": "openai-codex/gpt-6-astra",
+        "uiux-reviewer": {"model": "ollama-cloud/kimi-k3", "effort": "high"}},
+ "claude": {"implementer": "sonnet", "reviewer": "opus", "test": "sonnet", "final": "opus"},
+ "opencode": {"implementer": "opencode/gpt-6.1-sol", "reviewer": "opencode/deepseek-v4.1-flash", "test": "opencode/gpt-6.1-sol", "final": "opencode/claude-opus-5-5"},
+ "codex": {"implementer": "gpt-6.1-sol", "reviewer": "gpt-6-luna", "test": "gpt-6.1-sol", "final": "gpt-6-astra"}}
+JSON
+HOME="$pin_home" bash "$repo_dir/install.sh" "$pin_target" --yes > "$tmp_dir/pins-upgrade.out"
+grep -qx "model: openai-codex/gpt-6.1-sol" "$pin_target/.pi/agents/test-reviewer.md"
+for agent in taste-reviewer spec-reviewer docs-reviewer; do
+    grep -qx "model: ollama-cloud/glm-5.3" "$pin_target/.pi/agents/$agent.md"
+done
+# The hand-edited uiux-reviewer entry outranks the recommendation and survives
+# the rewrite. A read that drops it would pin the recommended model instead.
+grep -qx "model: ollama-cloud/kimi-k3" "$pin_target/.pi/agents/uiux-reviewer.md" || {
+    echo "FAIL: the saved uiux-reviewer model was dropped on read" >&2
+    exit 1
+}
+python3 - "$pin_target/.rig/models.json" "$agents_pinned" <<'JSON'
+import json, sys
+saved = json.load(open(sys.argv[1]))
+assert set(saved["pi"]) == set(sys.argv[2].split()), saved["pi"]
+assert saved["pi"]["spec-reviewer"] == {"model": "ollama-cloud/glm-5.3", "effort": "high"}
+assert saved["pi"]["final-reviewer"] == {"model": "openai-codex/gpt-6-astra", "effort": "medium"}
+JSON
+
+# A Pi effort edited by hand before models.json held effort is adopted, not reset.
+python3 - "$pin_target/.rig/models.json" <<'JSON'
+import json, sys
+with open(sys.argv[1]) as f:
+    saved = json.load(f)
+saved["pi"] = {"implementer": saved["pi"]["implementer"]["model"], "reviewer": saved["pi"]["taste-reviewer"]["model"],
+               "test": saved["pi"]["test-reviewer"]["model"], "final": saved["pi"]["final-reviewer"]["model"]}
+with open(sys.argv[1], "w") as f:
+    json.dump(saved, f, indent=2)
+JSON
+sed -i.bak 's/^thinking: medium$/thinking: xhigh/' "$pin_target/.pi/agents/final-reviewer.md"
+rm -f "$pin_target/.pi/agents/final-reviewer.md.bak"
+HOME="$pin_home" bash "$repo_dir/install.sh" "$pin_target" --yes > "$tmp_dir/pins-adopt.out"
+grep -qx 'thinking: xhigh' "$pin_target/.pi/agents/final-reviewer.md"
+grep -F "pi final-reviewer: kept installed effort xhigh" "$tmp_dir/pins-adopt.out" > /dev/null
+python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d['pi']['final-reviewer']['effort'] == 'xhigh' else 1)" \
+    "$pin_target/.rig/models.json"
+
+# Saved efforts are applied per agent in every harness and survive a re-run
+# without staging the Pi agents as conflicts. An effort the harness does not
+# accept is reported and replaced by the kit default.
+python3 - "$pin_target/.rig/models.json" <<'JSON'
+import json, sys
+with open(sys.argv[1]) as f:
+    saved = json.load(f)
+for harness in saved:
+    saved[harness]["docs-reviewer"]["effort"] = "low"
+    saved[harness]["final-reviewer"]["effort"] = "max"
+saved["pi"]["spec-reviewer"]["effort"] = "ultra"
+with open(sys.argv[1], "w") as f:
+    json.dump(saved, f, indent=2)
+JSON
+HOME="$pin_home" bash "$repo_dir/install.sh" "$pin_target" --yes > "$tmp_dir/pins-effort.out"
+grep -qx 'thinking: low' "$pin_target/.pi/agents/docs-reviewer.md"
+grep -qx 'thinking: max' "$pin_target/.pi/agents/final-reviewer.md"
+grep -qx 'thinking: high' "$pin_target/.pi/agents/spec-reviewer.md"
+grep -qx 'thinking: high' "$pin_target/.pi/agents/taste-reviewer.md"
+grep -qx 'effort: max' "$pin_target/.claude/agents/final-reviewer.md"
+grep -qx 'effort: low' "$pin_target/.claude/agents/docs-reviewer.md"
+grep -qx 'effort: max' "$pin_target/.opencode/agent/final-reviewer.md"
+grep -qx 'reasoningEffort: low' "$pin_target/.opencode/agent/docs-reviewer.md"
+grep -qx 'model_reasoning_effort = "max"' "$pin_target/.codex/agents/final-reviewer.toml"
+grep -qx 'model_reasoning_effort = "low"' "$pin_target/.codex/agents/docs-reviewer.toml"
+grep -F "pi spec-reviewer: effort ultra is not accepted, using the recommended one" "$tmp_dir/pins-effort.out" > /dev/null
+[ ! -e "$pin_target/.rig/merge/agents/final-reviewer.md" ]
+[ ! -e "$pin_target/.rig/merge/agents/docs-reviewer.md" ]
+HOME="$pin_home" bash "$repo_dir/install.sh" "$pin_target" --yes > "$tmp_dir/pins-effort2.out"
+grep -qx 'thinking: max' "$pin_target/.pi/agents/final-reviewer.md"
+[ ! -e "$pin_target/.rig/merge/agents/final-reviewer.md" ]
+python3 - "$pin_target/.rig/models.json" <<'JSON'
+import json, sys
+saved = json.load(open(sys.argv[1]))
+assert saved["pi"]["final-reviewer"]["effort"] == "max"
+assert saved["pi"]["spec-reviewer"]["effort"] == "high"
+JSON
+
+# Saved choices of current models remain authoritative, including ones that
+# are not the recommendation. Rewriting the pin updates Rig-owned output
+# without staging a conflict.
+python3 - "$pin_target/.rig/models.json" <<'JSON'
+import json, sys
+with open(sys.argv[1]) as f:
+    saved = json.load(f)
+for agent in ("taste-reviewer", "spec-reviewer", "docs-reviewer"):
+    saved["pi"][agent]["model"] = "anthropic/claude-sonnet-5-5"
+saved["pi"]["test-reviewer"]["model"] = "ollama-cloud/glm-5.3"
+saved["pi"]["final-reviewer"]["model"] = "openai-codex/gpt-6-astra"
+saved["opencode"]["final-reviewer"] = {"model": "opencode/kimi-k2.6", "effort": "medium"}
+saved["codex"]["final-reviewer"] = {"model": "gpt-6-luna", "effort": "medium"}
+saved["pi"]["fallback-runner"] = {"model": "ollama-cloud/fallback-model", "effort": "high"}
+saved["pi"]["unknown"] = "ollama-cloud/unknown-model"
+with open(sys.argv[1], "w") as f:
+    json.dump(saved, f, indent=2)
+JSON
+HOME="$pin_home" bash "$repo_dir/install.sh" "$pin_target" --yes > "$tmp_dir/pins2.out"
+grep -qx "model: anthropic/claude-sonnet-5-5" "$pin_target/.pi/agents/taste-reviewer.md"
+grep -qx "model: anthropic/claude-sonnet-5-5" "$pin_target/.pi/agents/spec-reviewer.md"
+grep -qx "model: anthropic/claude-sonnet-5-5" "$pin_target/.pi/agents/docs-reviewer.md"
+grep -qx "model: ollama-cloud/glm-5.3" "$pin_target/.pi/agents/test-reviewer.md"
+grep -qx 'model: openai-codex/gpt-6-astra' "$pin_target/.pi/agents/final-reviewer.md"
+grep -qx 'model: opencode/kimi-k2.6' "$pin_target/.opencode/agent/final-reviewer.md"
+grep -qx 'model = "gpt-6-luna"' "$pin_target/.codex/agents/final-reviewer.toml"
+if grep -Eq '^(reasoningEffort:|effort:)' "$pin_target/.opencode/agent/final-reviewer.md"; then
+    echo 'FAIL: effort field leaked into an unsupported saved OpenCode model' >&2
+    exit 1
+fi
+grep -qx 'model_reasoning_effort = "medium"' "$pin_target/.codex/agents/final-reviewer.toml"
+if grep -q '^forceReasoning:' "$pin_target/.opencode/agent/final-reviewer.md"; then
+    echo 'FAIL: saved OpenCode Kimi pin has forceReasoning' >&2
+    exit 1
+fi
+for agent in $agents_all; do
+    if [ "$agent" = test-reviewer ]; then
+        continue
+    fi
+    if grep -qx "model: ollama-cloud/glm-5.3" "$pin_target/.pi/agents/$agent.md"; then
+        echo "FAIL: saved test model pinned $agent" >&2
+        exit 1
+    fi
+done
+
+# A saved superseded model is replaced by the current recommendation, and the
+# recap names the replacement.
+python3 - "$pin_target/.rig/models.json" <<'JSON'
+import json, sys
+with open(sys.argv[1]) as f:
+    saved = json.load(f)
+saved["pi"]["implementer"]["model"] = "openai-codex/gpt-5.6-terra"
+for agent in ("taste-reviewer", "spec-reviewer", "docs-reviewer"):
+    saved["pi"][agent]["model"] = "ollama-cloud/deepseek-v4-flash:0731"
+with open(sys.argv[1], "w") as f:
+    json.dump(saved, f, indent=2)
+JSON
+HOME="$pin_home" bash "$repo_dir/install.sh" "$pin_target" --yes > "$tmp_dir/pins-superseded.out"
+grep -qx "model: openai-codex/gpt-6.1-terra" "$pin_target/.pi/agents/taste-reviewer.md"
+grep -qx "thinking: medium" "$pin_target/.pi/agents/taste-reviewer.md"
+grep -F "pi taste-reviewer: deepseek-v4-flash:0731 replaced by gpt-6.1-terra" "$tmp_dir/pins-superseded.out" > /dev/null
+grep -F "pi implementer: gpt-5.6-terra replaced by" "$tmp_dir/pins-superseded.out" > /dev/null
+if grep -q '^model: ' "$pin_target/.pi/agents/fallback-runner.md"; then
+    echo "FAIL: hand-edited fallback-runner has a model pin" >&2
+    exit 1
+fi
+python3 -c "import json,sys; d=json.load(open(sys.argv[1])); agents=set(sys.argv[2].split()); sys.exit(0 if all(set(entries) == agents for entries in d.values()) else 1)" \
+    "$pin_target/.rig/models.json" "$agents_pinned"
+[ ! -e "$pin_target/.rig/merge/agents/taste-reviewer.md" ]
+[ ! -e "$pin_target/.rig/merge/agents/test-reviewer.md" ]
+
+# A real local edit still wins over the kit.
+printf '\nLocal house rule.\n' >> "$pin_target/.pi/agents/implementer.md"
+HOME="$pin_home" bash "$repo_dir/install.sh" "$pin_target" --yes > "$tmp_dir/pins3.out"
+grep -qF "Local house rule." "$pin_target/.pi/agents/implementer.md"
+[ -f "$pin_target/.rig/merge/agents/implementer.md" ]
+
+# No catalogue to read: say so rather than pinning a model that cannot run.
+bare_target="$tmp_dir/bare"
+mkdir "$bare_target"
+bare_home="$tmp_dir/bare-home"
+mkdir -p "$bare_home"
+env PATH="$tmp_dir/backlogbin:/usr/bin:/bin" HOME="$bare_home" \
+    bash "$repo_dir/install.sh" "$bare_target" --no-input > "$tmp_dir/bare.out"
+if [ -f "$bare_target/.pi/agents/implementer.md" ] \
+    && grep -q "^model: " "$bare_target/.pi/agents/implementer.md"
+then
+    echo "FAIL: bare Pi implementer has a model pin" >&2
+    exit 1
+fi
+grep -F "main model" "$tmp_dir/bare.out" > /dev/null
+
+
+# Reassigning models by hand: select each role's second current candidate.
+cat > "$tmp_dir/drive_customize.py" <<'PY'
+import os
+import pty
+import re
+import select
+import sys
+import time
+
+installer, target = sys.argv[1:]
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("bash", ["bash", installer, target], os.environ)
+
+steps = [
+    (b"enter confirm", b"\r"),
+    (b"customize", b"e"),
+    (b"Which editor?", b"\r"),
+    (b"implementer", b"\x1b[B\r"),
+    (b"taste-reviewer", b"\x1b[B\r"),
+    (b"spec-reviewer", b"\x1b[B\r"),
+    (b"uiux-reviewer", b"\x1b[B\r"),
+    (b"docs-reviewer", b"\x1b[B\r"),
+    (b"test-reviewer", b"\x1b[B\r"),
+    (b"final-reviewer", b"\x1b[B\r"),
+]
+
+data = b""
+for prompt, reply in steps:
+    deadline = time.time() + 20
+    while prompt not in data:
+        if time.time() > deadline:
+            sys.stderr.write("timed out waiting for %r\n" % prompt)
+            os.kill(pid, 9)
+            raise SystemExit(3)
+        if not select.select([fd], [], [], 0.2)[0]:
+            continue
+        try:
+            chunk = os.read(fd, 65536)
+        except OSError:
+            chunk = b""
+        if not chunk:
+            break
+        data += re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", chunk).replace(b"\r", b"")
+    data = data.split(prompt, 1)[1]
+    os.write(fd, reply)
+
+try:
+    while os.read(fd, 65536):
+        pass
+except OSError:
+    pass
+_, status = os.waitpid(pid, 0)
+raise SystemExit(os.waitstatus_to_exitcode(status))
+PY
+
+custom_target="$tmp_dir/custom"
+mkdir "$custom_target"
+custom_home="$tmp_dir/custom-home"
+mkdir -p "$custom_home"
+env PATH="$tmp_dir/bin:/usr/bin:/bin" HOME="$custom_home" \
+    "$python_bin" "$tmp_dir/drive_customize.py" "$repo_dir/install.sh" "$custom_target"
+# Each agent takes its second pair: Sonnet 5.5 for writer and test, Flash high
+# for routine review, and Opus 5.5 medium for final review.
+grep -qx "model: ollama-cloud/deepseek-v4.1-flash" "$custom_target/.pi/agents/taste-reviewer.md"
+grep -qx "model: ollama-cloud/deepseek-v4.1-flash" "$custom_target/.pi/agents/docs-reviewer.md"
+grep -qx "thinking: high" "$custom_target/.pi/agents/docs-reviewer.md"
+grep -qx "model: ollama-cloud/deepseek-v4.1-flash" "$custom_target/.pi/agents/uiux-reviewer.md"
+grep -qx "thinking: high" "$custom_target/.pi/agents/uiux-reviewer.md"
+grep -qx "model: anthropic/claude-sonnet-5-5" "$custom_target/.pi/agents/implementer.md"
+grep -qx "model: anthropic/claude-sonnet-5-5" "$custom_target/.pi/agents/test-reviewer.md"
+grep -qx "model: anthropic/claude-opus-5-5" "$custom_target/.pi/agents/final-reviewer.md"
+grep -qx "thinking: medium" "$custom_target/.pi/agents/final-reviewer.md"
+python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d['pi']['docs-reviewer'] == {'model': 'ollama-cloud/deepseek-v4.1-flash', 'effort': 'high'} else 1)" \
+    "$custom_target/.rig/models.json"
+
+if find "$tmp_dir" -name FINDINGS.md -print -quit | grep -q .; then
+    echo "FAIL: installer generated a FINDINGS.md file" >&2
+    exit 1
+fi
+
+bash -n "$repo_dir/install.sh" "$repo_dir/check-update" "$repo_dir/tests/test_install.sh"
+echo "test_install.sh: PASS"

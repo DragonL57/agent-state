@@ -1,7 +1,0 @@
-{
-  "enabled": true,
-  "model": {
-    "provider": "mistral",
-    "id": "deepseek-v4-1-flash-1017"
-  }
-}

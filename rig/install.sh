@@ -1,0 +1,822 @@
+#!/usr/bin/env bash
+# Install the coding-practices kit into a target repo (new or existing).
+# Usage: ./install.sh /path/to/repo [--yes|--no-input]
+# Interactive only when attached to a terminal, so agents and CI stay unblocked:
+#   --yes       set up every supported editor without asking
+#   --no-input  set up pi only, without asking
+set -euo pipefail
+
+repository="https://github.com/DragonL57/rig"
+main_ref_url="https://api.github.com/repos/DragonL57/rig/git/ref/heads/main"
+
+# Keep these helpers in sync with check-update; deployed scripts cannot share code.
+is_valid_revision() {
+    local revision="$1"
+    [ "${#revision}" -eq 40 ] || return 1
+    case "$revision" in
+        *[!0123456789abcdefABCDEF]*) return 1 ;;
+    esac
+}
+
+normalize_revision() {
+    printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+resolve_main_revision() {
+    local response revision
+    command -v curl > /dev/null 2>&1 || return 1
+    response="$(curl -fsSL --connect-timeout 5 --max-time 10 "$main_ref_url" 2> /dev/null || true)"
+    revision="$(printf '%s\n' "$response" | sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    is_valid_revision "$revision" || return 1
+    normalize_revision "$revision"
+}
+
+# Piped from curl ($0 is "bash"), there is no script directory to speak of.
+case "$0" in
+    */*) kit_dir="$(cd "$(dirname "$0")" && pwd)" ;;
+    *)   kit_dir="" ;;
+esac
+target="${1:?usage: ./install.sh /path/to/repo [--yes|--no-input]}"
+kit_revision="unknown"
+
+if ! command -v backlog > /dev/null; then
+    printf 'error: Rig needs Backlog.md, and the backlog command is not installed.\n' >&2
+    printf '       Install it with npm i -g backlog.md, then run this again.\n' >&2
+    exit 1
+fi
+
+# Without the kit beside the script, fetch it.
+if [ -f "$kit_dir/agents/implementer.md" ]; then
+    if revision="$(git -C "$kit_dir" rev-parse HEAD 2> /dev/null)" \
+        && is_valid_revision "$revision"; then
+        kit_revision="$(normalize_revision "$revision")"
+    fi
+else
+    kit_dir="$(mktemp -d)"
+    downloaded_kit="$kit_dir"
+    archive_ref="refs/heads/main"
+    if kit_revision="$(resolve_main_revision)"; then
+        archive_ref="$kit_revision"
+    else
+        kit_revision=unknown
+    fi
+    if ! curl -fsSL "https://codeload.github.com/DragonL57/rig/tar.gz/$archive_ref" \
+        | tar -xz -C "$kit_dir" --strip-components=1 2> /dev/null; then
+        printf 'error: could not download the Rig kit.\n' >&2
+        printf '       Check your connection, or clone the repo and run ./install.sh instead.\n' >&2
+        exit 1
+    fi
+fi
+
+target="$(cd "$target" && pwd)"
+answer_mode="${2:-ask}"
+
+kit_agents=""
+trap 'rm -rf "${downloaded_kit:-}" "${kit_agents:-}"; [ -n "${spinner_pid:-}" ] && kill "$spinner_pid" 2> /dev/null' EXIT
+
+# shellcheck source=harnesses.sh
+. "$kit_dir/harnesses.sh"
+# shellcheck source=models.sh
+. "$kit_dir/models.sh"
+
+# Colors, unless piped to a file or NO_COLOR is set.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    bold=$'\033[1m'; dim=$'\033[2m'; green=$'\033[32m'; cyan=$'\033[36m'
+    blue=$'\033[34m'; yellow=$'\033[33m'; magenta=$'\033[35m'
+    grey=$'\033[90m'; reset=$'\033[0m'
+else
+    bold=""; dim=""; green=""; cyan=""; blue=""; yellow=""; magenta=""
+    grey=""; reset=""
+fi
+
+say() { printf '  %s%-9s%s %s\n' "$2" "$1" "$reset" "$3"; }
+note() { printf '%s%s%s\n' "$dim" "$1" "$reset"; }
+step() { printf '\n  %s%s%s\n' "$bold$blue" "$1" "$reset"; }
+
+# Section heading for the two interactive blocks.
+heading() {
+    printf '\n  %s%s%s %s%s%s\n' "$bold$cyan" "$1" "$reset" "$grey" "$2" "$reset"
+}
+
+# Body line of an option block. Bare words wrapped in @...@ are highlighted,
+# which keeps the source readable next to the escape codes.
+body() {
+    [ -z "$1" ] && { echo; return; }
+    printf '  %s%s%s\n' "$grey" "$1" "$reset" \
+        | sed -e "s/@\([^@]*\)@/$(printf '\033[0m\033[36m')\1$(printf '\033[0m\033[90m')/g"
+}
+
+# True when the script will actually put a question to a human, so the
+# explanations below are printed for readers, not for agents and CI logs.
+asking() {
+    case "$answer_mode" in
+        --yes|--no-input) return 1 ;;
+    esac
+    [ -e /dev/tty ] && [ -t 1 ]
+}
+
+# Animated dots on one line, for the few seconds spent shelling out to each
+# editor for its model list. Silent without a terminal, so agent and CI logs
+# stay clean.
+spinner_pid=""
+spinner_start() {
+    asking || return 0
+    (
+        while :; do
+            for dots in '.  ' '.. ' '...'; do
+                printf '\r\033[K  %s%s%s%s' "$grey" "$1" "$dots" "$reset" > /dev/tty
+                sleep 0.3
+            done
+        done
+    ) &
+    spinner_pid=$!
+}
+
+spinner_stop() {
+    [ -n "$spinner_pid" ] || return 0
+    kill "$spinner_pid" 2> /dev/null || true
+    wait "$spinner_pid" 2> /dev/null || true
+    spinner_pid=""
+    printf '\r\033[K' > /dev/tty
+}
+
+# Return the conventional global path for a skill pi already knows about.
+global_skill_path() {
+    local name="$1" path
+    [ -n "${HOME:-}" ] || return 1
+    for path in \
+        "$HOME/.pi/agent/skills/$name/SKILL.md" \
+        "$HOME/.pi/agent/skills/$name.md" \
+        "$HOME/.agents/skills/$name/SKILL.md"
+    do
+        [ -f "$path" ] && { printf '%s\n' "$path"; return 0; }
+    done
+    return 1
+}
+
+# Arrow-key select over "key:Label" pairs, into picked. Mode "many" toggles
+# with space and starts with the installed tools ticked; mode "one" moves a
+# single mark and starts on the first entry. Without raw mode it falls back to
+# that same starting selection, so a dumb terminal still gets a sane answer.
+pick_list() {
+    local mode="$1"; shift
+    local options=("$@") labels=() states=() cursor=0 key rest
+    picked=""
+
+    local opt
+    for opt in "${options[@]}"; do
+        labels+=("${opt#*:}")
+        if [ "$mode" = one ]; then
+            states+=(off)
+        elif command -v "${opt%%:*}" > /dev/null; then
+            states+=(on)
+        else
+            states+=(off)
+        fi
+    done
+    [ "$mode" = one ] && states[0]=on
+
+    if ! asking || ! stty -g < /dev/tty > /dev/null 2>&1; then
+        local i
+        for i in "${!options[@]}"; do
+            if [ "${states[$i]}" = on ]; then picked="$picked ${options[$i]%%:*}"; fi
+        done
+        picked="${picked# }"
+        return 0
+    fi
+
+    local saved
+    saved="$(stty -g < /dev/tty)"
+    # Restore the terminal even if the user quits mid-prompt. The settings are
+    # baked into the trap rather than read from a local at fire time: a RETURN
+    # trap outlives the call that set it, and would find the variable gone.
+    trap "stty '$saved' < /dev/tty; printf '\033[?25h' > /dev/tty" RETURN INT
+    stty raw -echo < /dev/tty
+    printf '\033[?25l' > /dev/tty
+
+    local first=1 i
+    while :; do
+        [ "$first" = 1 ] || printf '\033[%dA' "${#options[@]}" > /dev/tty
+        first=0
+        for i in "${!options[@]}"; do
+            local mark="${dim}○${reset}" line="$grey"
+            if [ "$mode" = one ]; then
+                [ "$i" = "$cursor" ] && mark="${green}●${reset}" && line="$reset"
+            elif [ "${states[$i]}" = on ]; then
+                mark="${green}●${reset}"; line="$reset"
+            fi
+            if [ "$i" = "$cursor" ]; then
+                printf '\r\033[K    %s❯%s %s %s%s%s\n' \
+                    "$cyan" "$reset" "$mark" "$bold" "${labels[$i]}" "$reset" > /dev/tty
+            else
+                printf '\r\033[K      %s %s%s%s\n' \
+                    "$mark" "$line" "${labels[$i]}" "$reset" > /dev/tty
+            fi
+        done
+
+        IFS= read -r -n1 key < /dev/tty
+        case "$key" in
+            $'\033')
+                # Whole seconds only: bash 3.2, which macOS still ships,
+                # rejects a fractional timeout outright. The rest of an arrow
+                # key is already in the buffer, so this never actually waits.
+                IFS= read -r -n2 -t 1 rest < /dev/tty
+                case "$rest" in
+                    '[A') cursor=$(( (cursor - 1 + ${#options[@]}) % ${#options[@]} )) ;;
+                    '[B') cursor=$(( (cursor + 1) % ${#options[@]} )) ;;
+                esac
+                ;;
+            ' ')
+                [ "$mode" = one ] && continue
+                if [ "${states[$cursor]}" = on ]; then states[$cursor]=off; else states[$cursor]=on; fi
+                ;;
+            k) cursor=$(( (cursor - 1 + ${#options[@]}) % ${#options[@]} )) ;;
+            j) cursor=$(( (cursor + 1) % ${#options[@]} )) ;;
+            ''|$'\n'|$'\r')
+                [ "$mode" = one ] && { states=(); states[$cursor]=on; }
+                break
+                ;;
+            q|$'\003') states=(); break ;;
+        esac
+    done
+
+    for i in "${!options[@]}"; do
+        if [ "${states[$i]:-off}" = on ]; then picked="$picked ${options[$i]%%:*}"; fi
+    done
+    picked="${picked# }"
+    return 0
+}
+
+# The banner wears the car's paint: light body on top, dark cladding below.
+# Truecolor when the terminal says so, else the nearest 256-colour greys.
+banner() {
+    local rows=(
+'  ██████╗  █████╗ ███╗   ██╗██████╗ ██╗███╗   ██╗ ██████╗'
+'  ██╔══██╗██╔══██╗████╗  ██║██╔══██╗██║████╗  ██║██╔═══██╗'
+'  ██████╔╝███████║██╔██╗ ██║██║  ██║██║██╔██╗ ██║██║   ██║'
+'  ██╔═══╝ ██╔══██║██║╚██╗██║██║  ██║██║██║╚██╗██║██║   ██║'
+'  ██║     ██║  ██║██║ ╚████║██████╔╝██║██║ ╚████║╚██████╔╝'
+'  ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═══╝╚═════╝ ╚═╝╚═╝  ╚═══╝ ╚═════╝'
+    )
+    local truecolor=(
+        '103;249;235' '86;226;238' '74;198;240'
+        '68;170;238' '72;144;232' '82;122;222'
+    )
+    local fallback=(123 117 111 75 69 63)
+    local i
+
+    printf '\n'
+    for i in "${!rows[@]}"; do
+        if [ -z "$reset" ]; then
+            # Colour is off (NO_COLOR, or not a terminal): print it plain.
+            printf '%s\n' "${rows[$i]}"
+        elif [ "${COLORTERM:-}" = truecolor ] || [ "${COLORTERM:-}" = 24bit ]; then
+            printf '\033[38;2;%sm%s\033[0m\n' "${truecolor[$i]}" "${rows[$i]}"
+        else
+            printf '\033[38;5;%sm%s\033[0m\n' "${fallback[$i]}" "${rows[$i]}"
+        fi
+    done
+}
+
+if asking; then
+    banner
+    printf '\n  %sCoding rules, one agent writes, separate agents review.%s\n' "$grey" "$reset"
+else
+    printf '\n  %sRig%s %s— coding rules, one agent writes, separate agents review%s\n' \
+        "$bold$magenta" "$reset" "$grey" "$reset"
+fi
+printf '  %sInstalling into%s %s%s%s\n' "$grey" "$reset" "$cyan" "$target" "$reset"
+
+# All questions up front: a tool we call later (Backlog's own prompt) would
+# otherwise leave buffered input behind and swallow the next answer.
+asking && printf '\n  %sPick your editors and confirm their models, then I get out of your way.%s\n' "$grey" "$reset"
+
+global_grilling="$(global_skill_path grilling || true)"
+
+picked_keys="pi"
+case "$answer_mode" in
+    --no-input) ;;
+    --yes) picked_keys="pi claude opencode codex" ;;
+    *)
+        if asking; then
+            heading "Editors" "— where to put the eight helpers"
+            body "  Ticked ones are already on your machine."
+            body "  @↑↓ move, space select, enter confirm@"
+            printf '\n' > /dev/tty
+        fi
+        pick_list many "pi:pi" "claude:Claude Code" "opencode:opencode" "codex:Codex"
+        picked_keys="$picked"
+        ;;
+esac
+
+# Without a pinned model each harness spawns subagents on the orchestrator's
+# own model, so the reviewers are the same model as the writer. Resolve one
+# model and effort per agent from what each picked harness can actually run,
+# remembering earlier answers so a re-run does not undo a hand-edited choice.
+models_file="$target/.rig/models.json"
+model_notes=()
+
+# Anything already chosen wins over the recommendation, except a superseded
+# model: that one is resolved again, and the recap says what replaced it. An
+# effort the harness does not accept is reported and dropped, so the agent
+# takes the effort its preferences pair with the model.
+if [ -f "$models_file" ]; then
+    while IFS=$'\t' read -r harness agent value effort; do
+        [ -n "$harness" ] || continue
+        if superseded_models | grep -qxF "${value##*/}"; then
+            printf -v "$(assignment_var replaced "$harness" "$agent")" '%s' "$value"
+            continue
+        fi
+        printf -v "$(assignment_var model "$harness" "$agent")" '%s' "$value"
+        [ -n "$effort" ] || continue
+        if harness_efforts "$harness" | grep -qxF "$effort"; then
+            printf -v "$(assignment_var effort "$harness" "$agent")" '%s' "$effort"
+        else
+            model_notes+=("$harness $agent: effort $effort is not accepted, using the recommended one")
+        fi
+    done < <(read_saved_models "$models_file")
+fi
+
+# Fill in whichever of one harness's agents is still without a model, taking
+# the first preferred model and effort that harness can run.
+resolve_harness_models() {
+    local harness="$1" catalog agent var first choice old
+    catalog="$(harness_catalog "$harness")"
+    if [ -z "$catalog" ]; then
+        model_notes+=("$harness: could not read its model list, its agents follow the main model")
+        return 0
+    fi
+    for agent in $(pinned_agents); do
+        var="$(assignment_var model "$harness" "$agent")"
+        [ -n "${!var-}" ] && continue
+        if ! choice="$(resolve_agent_choice "$catalog" "$agent")"; then
+            model_notes+=("$harness $agent: nothing recommended is available, it follows the main model")
+            continue
+        fi
+        printf -v "$var" '%s' "${choice% *}"
+        printf -v "$(assignment_var effort "$harness" "$agent")" '%s' "${choice##* }"
+        old="$(assignment_var replaced "$harness" "$agent")"
+        if [ -n "${!old-}" ] && [ "${!old}" != "${choice% *}" ]; then
+            model_notes+=("$harness $agent: ${!old##*/} replaced by $(basename "${choice% *}")")
+        fi
+        # Only a catalogue spanning providers could have carried the first
+        # choice; Claude Code's aliases and Codex's own slugs never would, so
+        # reporting a substitution there would be noise.
+        case "$catalog" in */*) ;; *) continue ;; esac
+        first="$(agent_preferences "$agent" | head -1)"
+        first="${first% *}"
+        case "${choice% *}" in
+            *"$first") ;;
+            *) model_notes+=("$harness $agent: $first unavailable, using $(basename "${choice% *}")") ;;
+        esac
+    done
+    return 0
+}
+
+# A saved model without a saved effort takes the effort its preferences pair
+# with it, or the kit default for a model outside them. An installed Pi agent
+# from before models.json held effort keeps its own, so the first run does not
+# silently reset a hand-edited level; the recap names any it kept.
+fill_missing_efforts() {
+    local harness agent model_var var installed paired
+    for harness in $picked_keys; do
+        for agent in $(pinned_agents); do
+            model_var="$(assignment_var model "$harness" "$agent")"
+            var="$(assignment_var effort "$harness" "$agent")"
+            [ -n "${!model_var-}" ] && [ -z "${!var-}" ] || continue
+            paired="$(preferred_effort "$agent" "${!model_var}")"
+            [ -n "$paired" ] || paired="$(agent_thinking "$kit_dir/agents/$agent.md")"
+            installed="$target/.pi/agents/$agent.md"
+            if [ "$harness" = pi ] && [ -f "$installed" ] \
+                && grep -qxF "model: ${!model_var}" "$installed" \
+                && harness_efforts pi | grep -qxF "$(agent_thinking "$installed")"
+            then
+                printf -v "$var" '%s' "$(agent_thinking "$installed")"
+                [ "${!var}" = "$paired" ] \
+                    || model_notes+=("pi $agent: kept installed effort ${!var}; set it in models.json to change it")
+            else
+                printf -v "$var" '%s' "$paired"
+            fi
+        done
+    done
+}
+
+# One block per harness, one row per agent with its model and effort. Model ids
+# run long and differ per harness, so seven columns side by side are unreadable.
+print_model_matrix() {
+    local harness agent model_var effort_var
+    for harness in $picked_keys; do
+        printf '  %s  · %s%s\n' "$grey" "$reset" "$harness"
+        for agent in $(pinned_agents); do
+            model_var="$(assignment_var model "$harness" "$agent")"
+            effort_var="$(assignment_var effort "$harness" "$agent")"
+            if [ -n "${!model_var-}" ]; then
+                printf '      %-15s %s · %s\n' "$agent" "${!model_var}" "${!effort_var-}"
+            else
+                printf '      %-15s main model\n' "$agent"
+            fi
+        done
+    done
+}
+
+# Reassign one harness's agents by hand. Each agent offers the model and effort
+# pairs Rig would consider for it; an agent nothing recommended could fill
+# offers the whole catalogue at the kit's effort, so an unusual setup is still
+# one prompt, not a restart.
+customize_models() {
+    local harness agent catalog cand opts=() list=()
+    for harness in $picked_keys; do list+=("$harness:$harness"); done
+    printf '\n  %sWhich editor?%s\n\n' "$grey" "$reset" > /dev/tty
+    pick_list one "${list[@]}"
+    harness="$picked"
+    [ -n "$harness" ] || return 0
+
+    catalog="$(harness_catalog "$harness")"
+    for agent in $(pinned_agents); do
+        opts=()
+        while IFS= read -r cand; do
+            [ -n "$cand" ] && opts+=("${cand/ /|}:$(basename "${cand% *}") · ${cand##* }")
+        done < <(agent_candidates "$catalog" "$agent")
+        if [ "${#opts[@]}" -eq 0 ]; then
+            while IFS= read -r cand; do
+                [ -n "$cand" ] && opts+=("$cand|$(agent_thinking "$kit_dir/agents/$agent.md"):$cand")
+            done < <(printf '%s\n' "$catalog")
+        fi
+        [ "${#opts[@]}" -gt 0 ] || continue
+        printf '\n  %s%s%s\n\n' "$grey" "$agent" "$reset" > /dev/tty
+        pick_list one "${opts[@]}"
+        [ -n "$picked" ] || continue
+        printf -v "$(assignment_var model "$harness" "$agent")" '%s' "${picked%|*}"
+        printf -v "$(assignment_var effort "$harness" "$agent")" '%s' "${picked##*|}"
+    done
+    return 0
+}
+
+spinner_start "reading model lists"
+for harness in $picked_keys; do
+    resolve_harness_models "$harness"
+done
+spinner_stop
+fill_missing_efforts
+
+# Show the whole assignment at once: four pickers in a row would be a worse
+# question than the one it answers.
+if asking && [ -n "${picked_keys// /}" ]; then
+    heading "Models" "— which model runs each specialist"
+    body "  A reviewer on the writer's own model is not a second opinion,"
+    body "  so each specialist gets its own, from what your editors can run."
+    printf '\n' > /dev/tty
+    print_model_matrix > /dev/tty
+    for note in ${model_notes+"${model_notes[@]}"}; do
+        printf '  %s    %s%s\n' "$yellow" "$note" "$reset" > /dev/tty
+    done
+    printf '\n  %s?%s %sEnter%s accept %s·%s %se%s customize ' \
+        "$bold$magenta" "$reset" "$bold" "$reset" "$grey" "$reset" "$bold" "$reset" > /dev/tty
+    read -r -n1 model_reply < /dev/tty
+    printf '\n' > /dev/tty
+    case "$model_reply" in
+        e|E) customize_models ;;
+    esac
+fi
+
+# Remember the assignment so the next run reuses it verbatim.
+mkdir -p "$target/.rig"
+save_models "$models_file" $picked_keys
+
+# Generated candidates are disposable and rebuilt from the current kit.
+rm -rf "$target/.rig/merge"
+staged_count=0
+
+install_or_stage() {
+    local src="$1" dst="$2" stage="$3"
+    if [ ! -e "$dst" ]; then
+        mkdir -p "$(dirname "$dst")"
+        cp "$src" "$dst"
+        say installed "$green" "$dst"
+    elif cmp -s "$src" "$dst"; then
+        say unchanged "$dim" "$dst"
+    else
+        mkdir -p "$(dirname "$stage")"
+        cp "$src" "$stage"
+        staged_count=$((staged_count + 1))
+        say staged "$yellow" "$stage ${dim}for${reset} $dst"
+    fi
+}
+
+write_install_provenance() {
+    local manifest="$target/.rig/install.json" revision_json
+    mkdir -p "$target/.rig"
+    cp "$kit_dir/check-update" "$target/.rig/check-update"
+    chmod +x "$target/.rig/check-update"
+
+    if [ "$kit_revision" = unknown ]; then
+        revision_json=null
+    else
+        revision_json="\"$kit_revision\""
+    fi
+    {
+        printf '{\n'
+        printf '  "repository": "%s",\n' "$repository"
+        printf '  "revision": %s\n' "$revision_json"
+        printf '}\n'
+    } > "$manifest"
+}
+
+step "Core files"
+
+# Drop trailing blank lines, so files that differ only there compare equal.
+trim_trailing_blank_lines() {
+    sed -e :a -e '/^$/{$d;N;ba' -e '}'
+}
+
+# Rig owns everything above the project marker; the project owns the
+# rest. Older installs ended the core at an appended section or Backlog's block.
+core_only() {
+    awk '/<!-- Project-specific/ || /<!-- rig:/ || /<!-- BACKLOG.MD GUIDELINES/ { exit } { print }' "$1" \
+        | trim_trailing_blank_lines
+}
+
+# The project section a fresh AGENTS.md starts with: the marker and the
+# Corrections table up to its header, so the kit's own rows stay in the kit.
+project_template() {
+    awk 'found || /<!-- Project-specific/ { found = 1; print } found && /^\|---/ { exit }' "$1"
+}
+
+# An agent file without its model and effort, so two of them can be compared
+# for local edits without the pinned assignment counting as one.
+without_assignment_lines() {
+    grep -v -e '^model: ' -e '^thinking: ' "$1"
+}
+
+# Earlier versions appended governance, continuity, and parallel-agent
+# sections after markers of their own; playbooks and skills replace them. Each
+# section is its marker and one level-two heading with its body, ending at the
+# next level-two heading, the next marker, or the end of the file.
+remove_appended_sections() {
+    local file="$1" cleaned
+    grep -q '^<!-- rig:[a-z-]* -->$' "$file" || return 0
+    cleaned="$(mktemp)"
+    awk '
+        /^<!-- rig:[a-z-]* -->$/ { skip = 1; titled = 0; next }
+        skip && /^<!-- / { skip = 0 }
+        skip && /^## / { if (titled) skip = 0; else { titled = 1; next } }
+        !skip { print }
+    ' "$file" | trim_trailing_blank_lines > "$cleaned"
+    cat "$cleaned" > "$file"
+    rm -f "$cleaned"
+    say removed "$green" "earlier appended Rig sections ${dim}from${reset} $file"
+}
+
+kit_agents="$(mktemp)"
+{
+    core_only "$kit_dir/AGENTS.md"
+    printf '\n'
+    project_template "$kit_dir/AGENTS.md"
+} > "$kit_agents"
+
+if [ -e "$target/AGENTS.md" ]; then
+    remove_appended_sections "$target/AGENTS.md"
+fi
+if [ -e "$target/AGENTS.md" ] && diff -q <(core_only "$kit_dir/AGENTS.md") <(core_only "$target/AGENTS.md") > /dev/null; then
+    say unchanged "$dim" "$target/AGENTS.md"
+else
+    install_or_stage \
+        "$kit_agents" \
+        "$target/AGENTS.md" \
+        "$target/.rig/merge/AGENTS.md"
+fi
+
+rm -rf "$target/.rig/snippets"
+if [ "$kit_dir/.rig/playbooks" -ef "$target/.rig/playbooks" ]; then
+    say unchanged "$dim" "$target/.rig/playbooks/ ${dim}(the kit's own sources)${reset}"
+else
+    rm -rf "$target/.rig/playbooks"
+    mkdir -p "$target/.rig"
+    cp -R "$kit_dir/.rig/playbooks" "$target/.rig/playbooks"
+    say installed "$green" "$target/.rig/playbooks/"
+fi
+
+# The kit's skills are its .agents/skills/ directories, so a new one ships and
+# appears in the recap without a second edit here.
+kit_skills() {
+    local path
+    for path in "$kit_dir"/.agents/skills/*/; do
+        basename "$path"
+    done
+}
+
+# What each shipped skill does, for the recap. A skill with no line here shows
+# its bare name.
+skill_gloss() {
+    case "$1" in
+        rig-pickup)       printf 'resumes a session from the snapshot' ;;
+        rig-handoff)      printf 'writes a handover for the next session' ;;
+        rig-update)       printf 'updates this kit' ;;
+        browser-sessions) printf 'drives a real browser page' ;;
+        verify-app)       printf 'measures a feature in the running app' ;;
+    esac
+}
+
+skill_recap_list() {
+    local name gloss item text=""
+    for name in $(kit_skills); do
+        gloss="$(skill_gloss "$name")"
+        if [ -n "$gloss" ]; then
+            item="$name $gloss"
+        else
+            item="$name"
+        fi
+        if [ -z "$text" ]; then
+            text="$item"
+        else
+            text="$text, $item"
+        fi
+    done
+    printf '%s' "$text"
+}
+
+install_session_skills() {
+    local skills_dir="$1" name names=""
+    [ "$kit_dir/.agents/skills" -ef "$skills_dir" ] && return 0
+    for name in $(kit_skills); do
+        rm -rf "$skills_dir/$name"
+        mkdir -p "$skills_dir"
+        cp -R "$kit_dir/.agents/skills/$name" "$skills_dir/$name"
+        names="${names:+$names, }$name"
+    done
+    say installed "$green" "$skills_dir/ ${dim}($names)${reset}"
+}
+install_session_skills "$target/.agents/skills"
+# Claude Code reads project skills only from .claude/skills.
+case " $picked_keys " in
+    *" claude "*) install_session_skills "$target/.claude/skills" ;;
+esac
+
+agent_count="$(find "$kit_dir/agents" -name '*.md' | wc -l | tr -d ' ')"
+for harness in $picked_keys; do
+    if [ "$harness" = pi ]; then
+        # pi reads the kit's own format, so conflicts can be staged as usual.
+        # The pinned model still has to be written in, so translate first.
+        for agent in "$kit_dir"/agents/*.md; do
+            name="$(basename "$agent")"
+            pinned="$(mktemp)"
+            write_harness_agent "$agent" pi "$pinned"
+            # The model and thinking lines are Rig's to rewrite: an
+            # installed agent that differs from the kit only there is our own
+            # earlier output, not a local edit, so changing models.json takes
+            # effect on a re-run.
+            dst="$target/.pi/agents/$name"
+            if [ -e "$dst" ] && ! cmp -s "$pinned" "$dst" \
+                && diff -q <(without_assignment_lines "$agent") <(without_assignment_lines "$dst") > /dev/null
+            then
+                cp "$pinned" "$dst"
+                say updated "$green" "$dst"
+            else
+                install_or_stage "$pinned" "$dst" "$target/.rig/merge/agents/$name"
+            fi
+            rm -f "$pinned"
+        done
+    else
+        write_harness_agents "$kit_dir" "$target" "$harness"
+        say installed "$green" "$(harness_dir "$target" "$harness")/ ${dim}($agent_count agents)${reset}"
+    fi
+done
+
+# The grilling skill and the subagent runtime are pi's own, so they follow
+# that choice. Both are refetched from upstream on every run.
+install_skill() {
+    local name="$1" url="$2"
+    mkdir -p "$target/.pi/skills/$name"
+    if curl -fsSL "$url" -o "$target/.pi/skills/$name/SKILL.md"; then
+        say installed "$green" "$target/.pi/skills/$name/SKILL.md ${dim}(latest)${reset}"
+    else
+        rmdir "$target/.pi/skills/$name" 2> /dev/null
+        say warning "$yellow" "could not download the $name skill"
+    fi
+}
+
+case " $picked_keys " in
+    *" pi "*)
+        if [ -n "$global_grilling" ]; then
+            say unchanged "$dim" "grilling skill already global"
+        else
+            install_skill grilling \
+                "https://raw.githubusercontent.com/mattpocock/skills/main/skills/productivity/grilling/SKILL.md"
+        fi
+        ;;
+esac
+
+# Subagent runtime, project-local.
+case " $picked_keys " in
+    *" pi "*)
+        # pi downloads npm packages here. Agents, skills, and settings stay
+        # trackable so teammates get the same setup.
+        # Ask Git's patterns, not the file: a repo that already ignores all of
+        # .pi/ needs no rule of its own, and --no-index includes tracked paths.
+        if [ -d "$target/.git" ] \
+            && ! (cd "$target" && git check-ignore --no-index -q .pi/npm/ 2> /dev/null); then
+            printf '\n# pi project-local package installs.\n.pi/npm/\n' >> "$target/.gitignore"
+            say appended "$green" ".pi/npm/ ${dim}to${reset} $target/.gitignore"
+        fi
+        if command -v pi > /dev/null; then
+            (cd "$target" && pi install -l --approve npm:@tintinweb/pi-subagents)
+        else
+            say warning "$yellow" "pi not found — run 'pi install -l npm:@tintinweb/pi-subagents' here yourself"
+        fi
+        ;;
+esac
+
+if [ "$staged_count" -gt 0 ]; then
+    step "Conflicts to resolve"
+    printf '  %sYou already had some of these files, so I left yours alone.%s\n' "$yellow" "$reset"
+    printf '  %sMine are in .rig/merge/ — take what you want, then delete it.%s\n' "$yellow" "$reset"
+fi
+
+step "Backlog.md"
+skipped=()
+
+if [ -d "$target/backlog" ]; then
+    if ! grep -q "BACKLOG.MD GUIDELINES" "$target/AGENTS.md"; then
+        (cd "$target" && backlog init "$(basename "$target")" \
+            --agent-instructions agents > /dev/null 2>&1)
+        say appended "$green" "Backlog.md guidelines ${dim}to${reset} $target/AGENTS.md"
+    else
+        say unchanged "$dim" "Backlog.md guidelines in $target/AGENTS.md"
+    fi
+else
+    # A project name and --no-git keep init from opening its own prompt.
+    # It appends its own AGENTS.md section, which is what teaches the
+    # workflow, so let it: the block carries its own markers and re-runs
+    # cleanly. A repo without git stays without it.
+    git_flag=""
+    [ -d "$target/.git" ] || git_flag="--no-git"
+    (cd "$target" && backlog init "$(basename "$target")" \
+        --agent-instructions agents $git_flag > /dev/null 2>&1)
+    say installed "$green" "Backlog.md task tracking in $target/backlog"
+    say appended "$green" "Backlog.md guidelines ${dim}to${reset} $target/AGENTS.md"
+fi
+
+case "$picked_keys" in
+    *claude*|*opencode*|*codex*) ;;
+    *) skipped+=("Other editors: run this again to set the helpers up for Claude Code, opencode or Codex") ;;
+esac
+
+write_install_provenance
+
+printf '\n  %s✓ All set%s %s—%s %s%s%s\n' \
+    "$bold$green" "$reset" "$grey" "$reset" "$cyan" "$target" "$reset"
+
+# Recap: what is now in the repo and what it is for.
+recap() { printf '  %s  · %s%s%s%s%s%s\n' "$grey" "$reset" "$cyan" "$1" "$reset" "$grey$2" "$reset"; }
+
+printf '\n  %sWhat you now have:%s\n' "$grey" "$reset"
+if [ "$kit_revision" = unknown ]; then
+    recap "Rig kit revision" " — unknown"
+else
+    recap "Rig kit revision" " — ${kit_revision:0:7}"
+fi
+recap ".rig/install.json" " — the source revision from this successful install"
+recap ".rig/check-update" " — manually checks whether upstream main changed"
+recap "AGENTS.md" " — the always-on rules and the index of playbooks"
+recap ".rig/playbooks/" " — how-to guides agents read when the work calls for them"
+recap ".agents/skills/" " — $(skill_recap_list)"
+for harness in $picked_keys; do
+    case "$harness" in
+        pi)       recap ".pi/agents/" " — seven pinned specialists: implementer, taste-reviewer, spec-reviewer, uiux-reviewer, docs-reviewer, test-reviewer, final-reviewer; unpinned fallback-runner" ;;
+        claude)   recap ".claude/agents/" " — the same eight, for Claude Code" ;;
+        opencode) recap ".opencode/agent/" " — the same eight, for opencode" ;;
+        codex)    recap ".codex/agents/" " — the same eight, for Codex" ;;
+    esac
+done
+
+case " $picked_keys " in
+    *" pi "*)
+        if [ -n "$global_grilling" ]; then
+            recap "grilling (global)" " — /skill:grilling picks holes in a plan"
+        else
+            recap ".pi/skills/grilling/" " — /skill:grilling picks holes in a plan"
+        fi
+        ;;
+esac
+
+recap "backlog/" " — tasks your agents read and update between sessions"
+printf '  %s    uiux-reviewer also needs the apple-design skill for Apple interface guidelines, which this kit does not install: npx skills add dickwu/apple-design-skill%s\n' "$grey" "$reset"
+
+printf '\n  %sModels each specialist will run on:%s\n' "$grey" "$reset"
+print_model_matrix
+printf '  %s    fallback-runner has no default and requires a call-time model%s\n' "$grey" "$reset"
+for note in ${model_notes+"${model_notes[@]}"}; do
+    printf '  %s    %s%s\n' "$yellow" "$note" "$reset"
+done
+printf '  %s    edit .rig/models.json to change them%s\n' "$grey" "$reset"
+
+if [ "${#skipped[@]}" -gt 0 ]; then
+    printf '\n  %sSkipped, in case you want them later:%s\n' "$grey" "$reset"
+    for item in "${skipped[@]}"; do
+        printf '  %s  · %s%s\n' "$grey" "$item" "$reset"
+    done
+fi
+
+printf '\n  %sNothing to configure. Open the repo with your agent and work as usual.%s\n' \
+    "$grey" "$reset"
+echo

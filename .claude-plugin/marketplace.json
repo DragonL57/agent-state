@@ -1,0 +1,14 @@
+{
+  "name": "dragonl57-agent-state",
+  "owner": {
+    "name": "DragonL57"
+  },
+  "plugins": [
+    {
+      "name": "agent-state",
+      "source": "./plugin",
+      "description": "Keeps this machine's ~/.claude in sync with the Git-backed agent-state repo."
+    }
+  ],
+  "description": "agent-state: one Git-backed configuration for pi and Claude Code, rendered into each host's home."
+}

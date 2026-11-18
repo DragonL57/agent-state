@@ -1,5 +1,7 @@
-# pi-state-sync: host-local credentials and runtime data
+# agent-state: host-only credentials, runtime data and caches.
+# tools/state.py refuses to stage these even if this file is edited.
 .env
+.env.keys
 auth.json
 trust.json
 models-store.json
@@ -10,11 +12,27 @@ bin/
 node_modules/
 mcp-cache.json
 mcp-npx-cache.json
-
-# host-local pi installation and ad-hoc backups
 install/
 *.bak.*
 
-# modern-web-guidance corpus: fetched per host by skills/modern-web-guidance/sync.sh
-skills/modern-web-guidance/guides/
-skills/modern-web-guidance/INDEX.md
+# modern-web-guidance corpus: fetched per host by its own sync.sh
+shared/skills/modern-web-guidance/guides/
+shared/skills/modern-web-guidance/INDEX.md
+
+# Claude Code host state, if a checkout ever sits in ~/.claude
+projects/
+plugins/
+todos/
+shell-snapshots/
+file-history/
+history.jsonl
+paste-cache/
+session-env/
+backups/
+statsig/
+debug/
+ide/
+node_modules/
+*.tgz
+__pycache__/
+*.pyc
