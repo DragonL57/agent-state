@@ -15,7 +15,7 @@ Find the spec yourself:
 
 1. The Backlog task named in the brief, the branch name, or the commit messages (`backlog task view <ID> --plain`).
 2. The project's documented routing, then the authoritative current specification it names. When the repo has `backlog/`, specifications default to `backlog/docs/specs/`; another repository may name `spec/`, `docs/`, or another location.
-3. When the routing has no specification, say so explicitly and review the diff against its own claims (commit messages and stated intent).
+3. When step 1 finds no task, file it as `must-fix`, as `reviewing.md` defines it. Review the diff against its own claims and state them, so the report still answers the brief.
 
 Then judge the diff on five checks. Each is decidable by looking at the change, or a judgment that quotes the instance it rests on.
 

@@ -30,6 +30,21 @@ function managerWithHomes(pi, claude) {
 	};
 }
 
+/** A git repo holding a copy of the manager and one task, for the task-code rule. */
+function taskRepo() {
+	const root = mkdtempSync(join(tmpdir(), "agent-task-"));
+	cpSync(new URL("../tools/state.py", import.meta.url).pathname, join(root, "tools", "state.py"));
+	mkdirSync(join(root, "shared"), { recursive: true });
+	mkdirSync(join(root, "backlog", "tasks"), { recursive: true });
+	writeFileSync(join(root, "backlog", "tasks", "task-1 - A-Thing Done.md"), "---\nid: TASK-1\n---\n");
+	git(root, "init", "-q", "-b", "main");
+	git(root, "config", "user.email", "t@example.com");
+	git(root, "config", "user.name", "t");
+	git(root, "add", "-A");
+	git(root, "commit", "-qm", "chore: first task");
+	return root;
+}
+
 /** A minimal state tree: the two shared halves the manager reads. */
 function fixture() {
 	const root = mkdtempSync(join(tmpdir(), "agent-state-"));
@@ -104,6 +119,91 @@ test("snapshot reads a lockfile version as a version, and still refuses a real s
 		assert.match(result.err, /Literal secrets/);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("snapshot refuses a code change whose message names no Backlog task", () => {
+	const root = taskRepo();
+	try {
+		writeFileSync(join(root, "shared", "example.ts"), "work\n");
+		let result = manager(root, "snapshot", "chore: untracked work");
+		assert.equal(result.code, 1);
+		assert.match(result.err, /No Backlog task/);
+		assert.match(result.err, /TASK-3/);
+		assert.match(result.err, /Tasks here: TASK-1/);
+		// A refused snapshot leaves the index as it found it.
+		assert.equal(git(root, "diff", "--cached", "--name-only"), "", "the refusal staged nothing");
+
+		// A glob character is not a task code.
+		result = manager(root, "snapshot", "task-* feat: wildcard");
+		assert.equal(result.code, 1);
+
+		// An empty message has no code to find, so it is refused the same way.
+		result = manager(root, "snapshot", "");
+		assert.equal(result.code, 1);
+		assert.match(result.err, /No Backlog task/);
+
+		// Code needs its task file named even when a task file shares the stage.
+		writeFileSync(join(root, "backlog", "tasks", "task-2 - B.md"), "---\nid: TASK-2\n---\n");
+		writeFileSync(join(root, "backlog", "tasks", "task-1 - A-Thing Done.md"), "---\nid: TASK-1\nstatus: in progress\n---\n");
+		result = manager(root, "snapshot", "chore: untracked work");
+		assert.equal(result.code, 1);
+		assert.match(result.err, /No Backlog task/);
+
+		// A task code in any case names its task.
+		for (const message of ["TASK-1 feat: upper", "task-1 feat: lower", "Task-1 feat: mixed"]) {
+			writeFileSync(join(root, "shared", "example.txt"), message);
+			result = manager(root, "snapshot", message);
+			assert.equal(result.code, 0, result.err);
+			assert.equal(git(root, "log", "-1", "--format=%s"), message);
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("a prose change needs no task, and a task file alone commits", () => {
+	const root = taskRepo();
+	try {
+		// The bootstrap path the refusal names: create the task, then its code.
+		writeFileSync(join(root, "backlog", "tasks", "task-2 - B.md"), "---\nid: TASK-2\n---\n");
+		let result = manager(root, "snapshot", "chore: add a task");
+		assert.equal(result.code, 0, result.err);
+
+		// Prose outside `docs/` is a document stage, and the playbooks are most of it.
+		mkdirSync(join(root, "rig", "agents"), { recursive: true });
+		writeFileSync(join(root, "rig", "agents", "worker.md"), "rule\n");
+		writeFileSync(join(root, "shared", "AGENTS.MD"), "contract\n");
+		result = manager(root, "snapshot", "chore: tighten a playbook");
+		assert.equal(result.code, 0, result.err);
+		assert.equal(git(root, "log", "-1", "--format=%s"), "chore: tighten a playbook");
+
+		// One non-prose path beside the prose needs the task.
+		writeFileSync(join(root, "rig", "agents", "worker.md"), "rule 2\n");
+		writeFileSync(join(root, "shared", "secret.env"), "KEY=1\n");
+		result = manager(root, "snapshot", "chore: prose and a config");
+		assert.equal(result.code, 1);
+		assert.match(result.err, /No Backlog task/);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("a repo's first commit needs no task, whatever it changes", () => {
+	const fresh = mkdtempSync(join(tmpdir(), "agent-first-"));
+	try {
+		cpSync(new URL("../tools/state.py", import.meta.url).pathname, join(fresh, "tools", "state.py"));
+		mkdirSync(join(fresh, "shared"), { recursive: true });
+		mkdirSync(join(fresh, "backlog", "tasks"), { recursive: true });
+		writeFileSync(join(fresh, "shared", "example.txt"), "work\n");
+		git(fresh, "init", "-q", "-b", "main");
+		git(fresh, "config", "user.email", "t@example.com");
+		git(fresh, "config", "user.name", "t");
+		const result = manager(fresh, "snapshot", "chore: first commit");
+		assert.equal(result.code, 0, result.err);
+		assert.equal(git(fresh, "log", "-1", "--format=%s"), "chore: first commit");
+	} finally {
+		rmSync(fresh, { recursive: true, force: true });
 	}
 });
 

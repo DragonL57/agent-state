@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### TASK-3 Plan and spawn parallel slices
+
+- `reviewing.md` files a change that its branch, its commits, and `backlog task list` all fail to tie to a task as `must-fix`. Before this, the class had no entry, so the gap went unreported. `spec-reviewer` had the same hole at its "find the spec" step 3, where "say so explicitly" let the review continue.
+- `snapshot` refuses a change whose message's first word is no task file's id, when the change touches a file that is not prose (`.md`, `.mdx`, `.txt`, `.rst`). The guard runs only in a repo with a `backlog/` directory and a commit, and the refusal lists the ids it saw. The match ignores case, and `task-*` names no task.
+- The README's daily workflow shows a task code in its `snapshot` message, since a code change without one is now refused.
+- The delegation rule asks for a plan whose slices name their files. Two slices with no common file run at the same time, and a plan that cannot split says why.
+- `workflow.md` step 1 writes the plan in three passes: the file map, then the slices, then the steps inside each. The plan ends with a `Slices:` line in one of three forms, so a serial chain is stated rather than implied.
+- `parallel.md` owns spawn timing, the brief rule, a copyable plan template, and "A slice on its own branch". A worktree slice takes `isolation: "worktree"` per call and its git commands are the user's to approve.
+- `shared/playbooks/` is deleted. Six of its nine files had drifted from `rig/.rig/playbooks/`, the tree the contract reads, and `sync` rendered its `.md` files to both hosts' command folders, so both carried the old rules.
+- A worktree slice sets `isolation: "worktree"` on its own `Agent` call. In frontmatter it would put every slice on a new branch from the default branch, where the orchestrator's diff never sees its edits.
+
 ### TASK-2 Render the Claude Code status line from the tracked tree
 
 - The status line is one tracked script, `shared/statusline/claude.sh`, rendered to `~/.claude/statusline.sh` and made executable. It prints one row: directory, branch, model, effort, and the context bar with its max size.

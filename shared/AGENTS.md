@@ -56,9 +56,10 @@ owner only.
   the plan's contents are in `{{AGENT_STATE}}/rig/.rig/playbooks/workflow.md` step 1.
 - **One file, 30 changed lines or fewer: you write it alone.** No implementer, no
   reviewer. Report it as the single-file exemption.
-- **Everything bigger is a delegated change: plan it, then hand each slice to an
-  `implementer`**, in parallel when the slices share no file
-  (`{{AGENT_STATE}}/rig/.rig/playbooks/parallel.md`).
+- **Everything bigger is a delegated change: plan it as slices that name their
+  files, then hand every slice to an `implementer`.** Two slices with no common
+  file run at the same time. When the slices cannot run together, the plan says
+  why (`{{AGENT_STATE}}/rig/.rig/playbooks/parallel.md`).
 - Every message that reports a change ends with one line naming each reviewer and its verdict:
 
       Written by: implementer, 3 files. spec-reviewer: clean. taste-reviewer: changes needed.

@@ -108,18 +108,20 @@ No verb both records and publishes, and nothing runs Git from a lifecycle hook.
 shared/              the source of truth for both hosts
   AGENTS.md          the full contract; Claude gets all of it, only paths differ
   agents/            pi-frontmatter agent definitions, translated for Claude
-  playbooks/         the rig playbooks
   prompts/           slash commands (/duo exists on both hosts)
   skills/            SKILL.md trees
   statusline/        the Claude Code status line, rendered to ~/.claude/statusline.sh
 hosts/pi/            pi-only: AGENTS.append.md, the portable settings.json subset
 hosts/claude/        Claude-only: output styles, the portable settings.json subset
                      (the tracked statusLine key, merged into the home's file)
-rig/                 the rig kit (agents, skills, installers, bench tests)
+rig/                 the rig kit: agents, skills, installers, bench tests, and
+                     .rig/playbooks/ (the playbooks the contract reads)
 plugin/              the Claude Code plugin (commands, hooks)
 extensions/pi-state/ the pi extension: an /agent-state command over the manager
 tools/state.py       the manager both hosts call
 ```
+
+`docs/subagents.md` compares the ways Claude Code runs work at once and maps them onto this setup.
 
 `{{AGENT_STATE}}` is the only path a shared file may use. Both renderers resolve it to the clone, where playbooks, prompts and `tools/state.py` live; a shared file that hard-codes a home path is a bug.
 
@@ -143,14 +145,18 @@ The verbs are automated, and identical on both hosts:
 ```text
 # pi
 /agent-state pull
-/agent-state snapshot chore: tighten review playbook
+/agent-state snapshot "TASK-3 chore: tighten review playbook"
 /agent-state push
 
 # Claude Code
 /pull
-/snapshot chore: tighten review playbook
+/snapshot "TASK-3 chore: tighten review playbook"
 /push
 ```
+
+The message starts with the code of the Backlog task the change serves.
+
+`snapshot` refuses a change whose message's first word is no task id, when the change touches a file that is not prose (`.md`, `.mdx`, `.txt`, `.rst`). A repo without a `backlog/` directory, and a repo before its first commit, have no such rule.
 
 `pull` is the one to run first on any machine: it fast-forwards the clone and re-renders the configured homes, so it is also how a host picks up a change made on the other. Without a plugin command, call the manager directly and get the same result:
 

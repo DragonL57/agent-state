@@ -560,6 +560,31 @@ def cmd_status(root: Path) -> str:
     return "\n".join(summary)
 
 
+# A prose file: the change needs no Backlog task.
+PROSE_SUFFIXES = (".md", ".mdx", ".txt", ".rst")
+
+
+def task_code_missing(root: Path, message: str, paths: list[str]) -> None:
+    """Raise unless the message's first word is a task id, when a path outside `backlog/`
+    is not prose. No rule applies without a `backlog/` directory, before the first commit,
+    or when every changed path outside `backlog/` is prose. The id is the task file's name
+    up to ` - `, as Backlog names it (`task-3` for `task-3 - Title.md`)."""
+    if not (root / "backlog").is_dir() or not git_ok(root, "rev-parse", "--verify", "HEAD"):
+        return
+    outside = [p for p in paths if p and not p.startswith("backlog/")]
+    if not outside or all(p.lower().endswith(PROSE_SUFFIXES) for p in outside):
+        return
+    code = message.split(" ", 1)[0].upper() if message else ""
+    ids = {path.name.split(" - ", 1)[0].upper() for path in (root / "backlog" / "tasks").glob("task-*")}
+    if code in ids:
+        return
+    raise StateError(
+        "No Backlog task for this change. Start the message with a task code such as TASK-3 "
+        '(any case): run `backlog task create "..."`, then `snapshot "TASK-3 ..."`. Tasks here: '
+        + (", ".join(sorted(ids)) or "none")
+    )
+
+
 def cmd_snapshot(root: Path, message: str) -> str:
     violations = tracked_violations(root)
     if violations:
@@ -567,6 +592,9 @@ def cmd_snapshot(root: Path, message: str) -> str:
     issues = inspect_json(root)
     if issues:
         raise StateError("Literal secrets or invalid JSON: " + ", ".join(issues))
+    # Before staging, so a refusal leaves the index as it was found.
+    untracked = git(root, "ls-files", "-m", "-o", "--exclude-standard", "-z").split("\0")
+    task_code_missing(root, message, untracked)
     git(root, "add", "-A", "--", ".")
     staged = git(root, "diff", "--cached", "--name-only", "-z").split("\0")
     leaked = [path for path in staged if path and is_forbidden(path)]

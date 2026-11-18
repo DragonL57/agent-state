@@ -52,6 +52,7 @@ Finish when the brief's questions have evidence-backed answers or the budget is 
 File each finding under one of three headings:
 
 - `must-fix`: the change breaks behavior that works today, or leaves unmet a requirement within the brief's scope from the task, the specification, or the project's definition of done. Label it a plausible risk when the breakage is credible but not shown.
+- `must-fix`: an outside-the-exemption change that no task settles. Read all three: the branch name, every commit subject, and `backlog task list --plain`. A task that any one of them names settles the change, and the report names which one did. State the absent spec under `Unverified` (E3).
 - `minor`: every other improvement. A rule the formatter, linter, type checker, or CI already enforces is never a finding; style, readability, naming, structure, and wording are minor when no tool enforces them.
 - `user decision`: a product, scope, or support choice that the task and specification leave open, such as keeping unrequested behavior or supporting another platform or version. State the options and what each one adds or costs, and leave the choice to the user.
 
