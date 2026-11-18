@@ -31,12 +31,20 @@ being true.
   delegated change gets `spec-reviewer` and `taste-reviewer`, and risk decides
   only the reviewers added on top: `test-reviewer`, `docs-reviewer`,
   `uiux-reviewer`, and `final-reviewer`.
+- **The sensitive paths are the harness's own machinery.** In the kit at
+  `/home/thelong/rig`: `install.sh`, `models.sh`, `.rig/playbooks/`, `agents/`.
+  In this install: `rig/sync.sh`, `rig/playbooks/`, `agents/`,
+  `tests/test_harness.sh`, `.rig/models.json`, `AGENTS.md`, and this file.
+  A delegated change touching one of them takes `final-reviewer` and the user's
+  read, because its failure is silent: a render skips a playbook, a model line
+  drops out, a contract rule stops being checked. An exempt single-file edit of
+  one of them is reported with its line count.
 - **`fallback-runner` stays unpinned.** Its caller supplies an explicit model,
   because a fallback that inherits the writer's model is not a fallback. It is
   the only agent under `agents/` without a `model:` line, and the test enforces
   that.
 - **The global install routes models per role.** `.rig/models.json` holds one
-  model and effort per pinned agent, written by `rig/install.sh` and rendered
+  model and effort per pinned agent, written by the kit's `install.sh` and rendered
   into `agents/*.md`. Every role runs `mistral/deepseek-v4-1-flash-1017`, the
   only DeepSeek the Mistral provider carries here, and the effort is the only
   difference: implementer `medium`, taste, spec, test and uiux `high`,
@@ -50,7 +58,7 @@ being true.
   rules, the two allowed differences, and `RIG_KIT` are in that script's header.
 - **The kit owns `verify-app`; this install holds the copy at
   `~/.pi/agent/skills/verify-app/`.** The source is
-  `rig/.agents/skills/verify-app/`. `rig/install.sh` copies the kit's skills into
+  `.agents/skills/verify-app/`. The kit's `install.sh` copies its skills into
   the target's `.agents/skills/`, and pi reads the global copy at
   `skills/verify-app/`. That copy holds the feature map format
   (`verify/features.tsv`) and a Chrome DevTools Protocol driver
