@@ -4,20 +4,32 @@ Git-backed configuration for **two agent hosts at once**: [pi](https://pi.dev) a
 
 One repository holds the contract, agents, playbooks, prompts, skills and rig kit. Each host keeps its own clone and renders its own home from it: pi into its agent home (`AGENTS.md`, `agents/`, `prompts/`, `skills/`, `settings.json`), Claude Code into `~/.claude` (`CLAUDE.md`, `agents/`, `commands/`, `skills/`) plus the Claude plugin. A change is written once, on either host, and the other host picks it up with its own `pull`.
 
+## Quick start
+
+One clone serves both hosts on a machine. Clone it beside the homes, never inside one:
+
+```bash
+git clone https://github.com/DragonL57/agent-state.git ~/agent-state
+```
+
+The clone is the state; the homes (`~/.pi/agent`, `~/.claude`) are rendered *from* it. Point both hosts at the clone with `AGENT_STATE_DIR`, then render:
+
+```bash
+export AGENT_STATE_DIR=~/agent-state    # add to your shell profile
+python3 -I ~/agent-state/tools/state.py sync
+```
+
+`sync` writes both homes from the clone. Everything below is the per-host install.
+
+> `~/agent-state` is the default when `AGENT_STATE_DIR` is unset, so the export is optional — set it if you cloned somewhere else.
+
 ## Install (Claude Code)
 
 ```text
 /plugin install agent-state --marketplace DragonL57/agent-state
 ```
 
-Then, once per machine:
-
-```bash
-git clone https://github.com/DragonL57/agent-state.git ~/agent-state
-python3 -I ~/agent-state/tools/state.py pull
-```
-
-The plugin adds `/pull`, `/status`, `/snapshot`, `/push` and `/sync` (unprefixed, because a command named `status` would collide with Claude Code's own built-in), and a hook that tells a session, once, when this host is behind origin. `AGENT_STATE_DIR` points at a clone elsewhere; the default is `~/agent-state`.
+The plugin adds `/pull`, `/status`, `/snapshot`, `/push` and `/sync` (unprefixed, because a command named `status` would collide with Claude Code's own built-in), and a hook that tells a session, once, when this host is behind origin.
 
 ## Install (pi)
 
@@ -25,13 +37,44 @@ The plugin adds `/pull`, `/status`, `/snapshot`, `/push` and `/sync` (unprefixed
 pi install git:github.com/DragonL57/agent-state
 ```
 
-Restart pi, then:
+Restart pi, then connect the clone from the quick start:
 
 ```text
 /agent-state configure
 ```
 
-This repository holds only the two shared halves (`shared/`, `hosts/`) and the tooling, so it does not live in the pi home itself: clone it to `~/agent-state`, set `AGENT_STATE_DIR` to it, and the extension's `/agent-state configure <clone-url>` connects `origin` to it. The pi home stays a host directory that the manager renders, next to the secrets and sessions that never leave it. Pass another clone URL as the argument to use a fork.
+`configure` connects `origin` if the clone has none, then renders both homes. A clone made with `git clone` already has `origin`, so it reports "already configured" and stops; in that case the quick start's `sync` is the step that renders. If the clone does not exist it errors with the `git clone` line rather than creating state inside the pi home. Pass a URL to use a fork: `/agent-state configure https://github.com/you/agent-state.git`.
+
+### Migrating off the old `pi-state` layout
+
+Earlier versions kept the checkout *inside* the pi home, so `~/.pi/agent` was the repository itself. That no longer works: the clone renders the pi home, and the manager refuses a clone nested inside a home it writes, because rendering would overwrite the clone's own sources.
+
+Move it out in one step:
+
+```bash
+git clone https://github.com/DragonL57/agent-state.git ~/agent-state
+export AGENT_STATE_DIR=~/agent-state
+python3 -I ~/agent-state/tools/state.py sync
+```
+
+The old layout tracked about 200 files that the current tree derives instead. Do **not** delete `~/.pi/agent` to clean this up: it also holds host-only state that never belonged in the repository — `auth.json`, sessions, package caches — and it may hold uncommitted edits. Only the rendered leftovers are safe to remove, and only after `~/agent-state` renders:
+
+```bash
+# Old rendered playbooks; the kit's sources are now rig/.rig/playbooks/.
+rm -rf ~/.pi/agent/rig/playbooks
+
+# The old checkout's own git metadata, once ~/agent-state is rendering.
+# This does not touch auth.json, sessions/, npm/ or any untracked file.
+rm -rf ~/.pi/agent/.git
+```
+
+Before removing `.git`, check for uncommitted work you care about:
+
+```bash
+git -C ~/.pi/agent status --short
+```
+
+Anything listed there is not in the repository; either move it into `~/agent-state` and `snapshot` it, or keep the file where it is. Remove `.git` only when that list is empty or accounted for.
 
 ## The verbs
 
@@ -77,11 +120,11 @@ tools/state.py       the manager both hosts call
 | `model:` on a shared agent | kept for pi, dropped for Claude: Claude agents inherit the session model and effort |
 | `description:`, folded | `name:` added, description folded to one line |
 | `prompts/*.md` | `commands/*.md` (description and `argument-hint` carry) |
-| skill directories | symlinked into `~/.claude/skills/` (except pi-only skills) |
+| skill directories | symlinked into `~/.claude/skills/`; every skill is shared, so both hosts receive the same set |
 
 ## Daily workflow
 
-Pull before work on a host. After a change to the configuration, snapshot on the user's go-ahead, then push.
+The verbs are automated, and identical on both hosts:
 
 ```text
 # pi
@@ -94,6 +137,15 @@ Pull before work on a host. After a change to the configuration, snapshot on the
 /snapshot chore: tighten review playbook
 /push
 ```
+
+`pull` is the one to run first on any machine: it fast-forwards the clone and re-renders both homes, so it is also how a host picks up a change made on the other. Without a plugin command, call the manager directly and get the same result:
+
+```bash
+python3 -I ~/agent-state/tools/state.py pull     # fetch + fast-forward + re-render
+python3 -I ~/agent-state/tools/state.py status   # what changed, and what drifted
+```
+
+`pull` refuses a dirty tree rather than merging over it. `snapshot` records locally, `push` publishes; no single verb does both, so a change is reviewed before it leaves the machine.
 
 Never edit a rendered file (`~/.claude/CLAUDE.md`, the pi `AGENTS.md`): the next render overwrites it. Edit the shared tree and `sync`.
 
