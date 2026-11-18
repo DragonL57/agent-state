@@ -88,6 +88,25 @@ test("snapshot refuses a literal secret and accepts an env reference", () => {
 	}
 });
 
+test("snapshot reads a lockfile version as a version, and still refuses a real secret", () => {
+	const root = fixture();
+	try {
+		writeFileSync(
+			join(root, "package-lock.json"),
+			'{"packages":{"node_modules/a":{"dependencies":{"@aws-sdk/token-providers":"3.1048.0"}}}}\n',
+		);
+		let result = manager(root, "snapshot", "chore: lockfile");
+		assert.equal(result.code, 0, result.err);
+
+		writeFileSync(join(root, "package-lock.json"), '{"token":"sk-live-abc123"}\n');
+		result = manager(root, "snapshot", "chore: leak");
+		assert.equal(result.code, 1);
+		assert.match(result.err, /Literal secrets/);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("snapshot with nothing changed says so and does not commit", () => {
 	const root = fixture();
 	try {

@@ -7,6 +7,7 @@
 - `{{AGENT_STATE}}` resolves to the clone in both renderers (`tools/state.py`'s `rewrite_paths`, `extensions/pi-state/translate.ts`'s `claudePaths`). Rendered files named a home that held none of the content: ten paths were missing on pi and eleven on Claude Code.
 - `sync`, `pull` and `check` touch only the hosts this machine renders. The tracked `config.json` `hosts` key names them, `AGENT_STATE_HOSTS` overrides it, and both run when neither is set. `hosts` prints the list.
 - Three shared lines name a skill or prompt directory relative to the harness home instead of one host's absolute path: `shared/agents/uiux-reviewer.md`, `shared/skills/instruction-craft/SKILL.md`.
+- Snapshot reads a dotted version string (`3.1048.0`) as a version, so a lockfile's `@aws-sdk/token-providers` entry no longer blocks every commit.
 
 ## 0.1.0
 
