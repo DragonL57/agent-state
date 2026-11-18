@@ -2,6 +2,6 @@
   "enabled": true,
   "model": {
     "provider": "mistral",
-    "id": "mistral-small-latest"
+    "id": "deepseek-v4-1-flash-1017"
   }
 }

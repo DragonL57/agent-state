@@ -1,4 +1,4 @@
 {
-  "compactionModel": "mistral/mistral-small-2603",
+  "compactionModel": "mistral/deepseek-v4-1-flash-1017",
   "compactionThinkingLevel": "high"
 }
