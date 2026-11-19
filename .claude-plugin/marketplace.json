@@ -10,5 +10,5 @@
       "description": "Keeps this machine's ~/.claude in sync with the Git-backed agent-state repo."
     }
   ],
-  "description": "agent-state: one Git-backed configuration for pi and Claude Code, rendered into the configured homes of each machine."
+  "description": "agent-state: one Git-backed configuration for pi, Claude Code and Vibe, rendered into the configured homes of each machine."
 }

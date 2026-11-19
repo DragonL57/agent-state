@@ -1,10 +1,13 @@
 # agent-state: host-only credentials, runtime data and caches.
-# tools/state.py refuses to stage these even if this file is edited.
+# tools/state.py refuses the names in its HOST_ONLY list; the rest of this
+# file is git-only.
 .env
 .env.keys
 auth.json
 trust.json
 models-store.json
+# `settings.json` is host-only too, but a bare pattern would hide the tracked
+# `hosts/pi/settings.json` and `hosts/claude/settings.json`.
 sessions/
 npm/
 git/
@@ -13,7 +16,34 @@ node_modules/
 mcp-cache.json
 mcp-npx-cache.json
 install/
+downloads/
+.last-cleanup
 *.bak.*
+
+# Vibe host state, if a checkout ever sits in ~/.vibe
+/config.toml
+/config.toml.bak
+/hooks.toml
+/trusted_folders.toml
+/vibehistory
+/cache.toml
+/cache/
+/logs/
+/locks/
+/shell-tool/
+/worktrees/
+/skills-registry-cache/
+/*.lock
+/connector_bootstrap_cache.json
+/whoami_cache.json
+/model_catalog_cache.json
+/managed_config_cache.json
+/ui_startup_config.json
+/utility_model_cache.json
+/experiment_eval_cache.json
+/experiment_held_eval_cache.json
+/scheduled-loops.json
+/goal.json
 
 # modern-web-guidance corpus: fetched per host by its own sync.sh
 shared/skills/modern-web-guidance/guides/
@@ -33,7 +63,7 @@ statsig/
 debug/
 ide/
 node_modules/
-decisions/
+/decisions/
 *.tgz
 __pycache__/
 *.pyc

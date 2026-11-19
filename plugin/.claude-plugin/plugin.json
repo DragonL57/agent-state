@@ -1,7 +1,7 @@
 {
   "name": "agent-state",
   "version": "0.1.0",
-  "description": "Git-backed configuration shared by pi and Claude Code: pull before work, snapshot and push after a change.",
+  "description": "Git-backed configuration shared by pi, Claude Code and Vibe: pull before work, snapshot and push after a change.",
   "author": {
     "name": "DragonL57"
   },

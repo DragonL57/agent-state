@@ -75,7 +75,7 @@ owner only.
   passing test. Never conclude a verification attempt with a warning instead of
   a result.
 - A run under a grant writes one row per iteration to
-  `decisions/<slug>.tsv` beside this contract, where the slug is the branch name or the
+  `{{AGENT_STATE}}/decisions/<slug>.tsv` in the clone, where the slug is the branch name or the
   task code. The first row creates the directory and writes the header.
   Tab-separated columns: time, phase, decision, reason, evidence, result. The
   `decision` column names the approach, which is how a plateau is counted. The
@@ -381,7 +381,7 @@ ones that fire on a task type.
 | `instruction-craft` | Writing or editing AGENTS.md, CLAUDE.md, a prompt template, a skill, or any instruction; deciding where a rule belongs; a session that has grown long | Editing an instruction from memory |
 | `browser-sessions` | Before the first browser call of any task | No browser in play |
 | `verify-app` | Briefing a reviewer on a change that touches a mapped feature, or the user asks whether something works in the running app | No app to run, or the change is prose only |
-| `agent-state` | Any `agent-state` command, or a task touching pi or Claude Code settings, skills, or the agent-state repository | Never |
+| `agent-state` | Any `agent-state` command, or a task touching pi, Claude Code or Vibe settings, skills, or the agent-state repository | Never |
 
 
 <!-- BACKLOG.MD GUIDELINES START -->

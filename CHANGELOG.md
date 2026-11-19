@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### TASK-5 Render the Vibe home
+
+- Vibe is the third host. `sync` renders `~/.vibe/AGENTS.md` from `shared/AGENTS.md` plus `hosts/vibe/AGENTS.append.md`, symlinks every shared skill except the pi-only ones into `~/.vibe/skills/`, and writes each shared agent as `~/.vibe/agents/<name>.toml`.
+- `HARNESS.md` is rendered beside every contract, into all three homes, because the contract tells the agent to read it there. `check` reports a missing or stale copy, and `sync` removes one the clone no longer has.
+- The agent TOML carries `agent_type = "subagent"`, the folded description, Vibe tool names in `enabled_tools` (`read` becomes `read_file`, `write` becomes `write_file, edit`), and the body as `instructions`. `model:` and `thinking:` are dropped, so a Vibe subagent inherits the session's model and effort, as a Claude agent does.
+- Five pi tools have no Vibe tool and are dropped: `grep`, `find` and `ls` run through `bash`, and web search and fetch come from the `connector_web_search` connector. Vibe's own `RETIRED_TOOL_NAMES` names the replacement for `grep`, web search and fetch; `find` and `ls` are not Vibe tools at all.
+- The renderer refuses the shapes Vibe would silently drop: no description, an `enabled_tools` that maps to nothing (an absent or empty list means every tool to Vibe), a body a TOML literal string cannot hold, the reserved name `main`, and instructions over 65,536 characters. `check` reports the first refusal as one finding line, after the findings it already collected.
+- `check` names a Vibe contract or agent TOML that is missing or stale, an agent TOML the renderer wrote and no longer would, and a skill link that is missing or points elsewhere. `hosts` prints the state tree, the configured homes and the origin URL. `AGENT_VIBE_HOME` overrides the home, and `config.json` lists `vibe`.
+- `sync` removes an orphaned Vibe agent TOML and a stale skill link, so the next `check` reports neither.
+- Vibe's `config.toml`, `config.toml.bak`, `hooks.toml`, `.env`, sessions and caches are refused at the root of the tree, like the other hosts' host-only files. The renderer never writes `config.toml`.
+- `shared/prompts/` is not rendered to Vibe: Vibe has no custom slash commands. The `agent-state` skill is its command surface, and it calls the same manager.
+- The test suite renders a Vibe home, parses the agent TOML with `tomllib`, and checks the drift report for a missing file, a stale skill link and an orphaned agent. The eight rendered agents were also loaded once with Vibe's own `AgentProfile.from_toml`.
+- Shared fixes the third host exposed: `render_home` refuses an unknown host instead of rendering the Claude home, `is_forbidden` no longer strips a leading dot (`.env` and `.last-cleanup` were never refused), a regular file where a skill link goes is replaced, the clone-inside-home guard resolves the home, and `_hosts` dedupes and rejects an empty list. `check` now also reports a missing or repointed Claude skill link.
+
 ### TASK-4 Give the test suite its own git identity
 
 - The test suite sets `GIT_AUTHOR_*` and `GIT_COMMITTER_*` once, in an `IDENTITY` constant, and spreads it into the `git` helper, the `manager` spawn, and the `managerWithHomes` spawn. On a GitHub Actions runner with no global `user.name`, every test that committed died with `fatal: empty ident name`; `npm run check` now passes with `GIT_CONFIG_GLOBAL=/dev/null`.

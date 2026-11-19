@@ -1,7 +1,7 @@
 {
   "name": "agent-state",
   "version": "0.1.0",
-  "description": "Git-backed configuration shared by pi and Claude Code, with a cross-host renderer and a Claude Code plugin",
+  "description": "Git-backed configuration shared by pi, Claude Code and Mistral Vibe, with a cross-host renderer and a Claude Code plugin",
   "license": "MIT",
   "author": "DragonL57",
   "type": "module",
@@ -11,6 +11,8 @@
     "pi-extension",
     "claude-code",
     "claude-code-plugin",
+    "vibe",
+    "mistral-vibe",
     "configuration",
     "dotfiles",
     "git",

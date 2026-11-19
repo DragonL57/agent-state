@@ -11,9 +11,9 @@ const GIT_TIMEOUT_MS = 60_000;
  *
  * One clone per machine, beside the homes, and the manager renders the
  * configured homes from it (it refuses a clone inside a home it renders). The
- * manager in tools/state.py does the work for both hosts; this extension only
- * resolves the verbs and shows the result, so neither host can drift from the
- * other.
+ * manager in tools/state.py does the work for every host; this extension only
+ * resolves the verbs and shows the result, so no host can drift from the
+ * others.
  */
 export default function agentStateExtension(pi: ExtensionAPI) {
 	async function manager(action: string, rest: string): Promise<string> {
@@ -69,7 +69,7 @@ export default function agentStateExtension(pi: ExtensionAPI) {
 	}
 
 	pi.registerCommand("agent-state", {
-		description: "The Git-backed state shared by pi and Claude Code: status, snapshot, pull, push, sync, hosts",
+		description: "The Git-backed state shared by pi, Claude Code and Vibe: status, snapshot, pull, push, sync, check, hosts",
 		getArgumentCompletions: (prefix) => {
 			if (/\s/.test(prefix)) return null;
 			const matches = ["configure", ...COMMANDS].filter((command) => command.startsWith(prefix));

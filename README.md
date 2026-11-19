@@ -1,8 +1,8 @@
 # agent-state
 
-Git-backed configuration for **two agent hosts**: [pi](https://pi.dev) and [Claude Code](https://claude.com/claude-code).
+Git-backed configuration for **three agent hosts**: [pi](https://pi.dev), [Claude Code](https://claude.com/claude-code), and [Mistral Vibe](https://docs.mistral.ai/vibe/code/overview).
 
-One repository holds the contract, agents, playbooks, prompts, skills and rig kit. Each machine keeps one clone and renders the homes of the hosts it runs: pi into its agent home (`AGENTS.md`, `agents/`, `prompts/`, `skills/`, `settings.json`), Claude Code into `~/.claude` (`CLAUDE.md`, `agents/`, `commands/`, `skills/`, `statusline.sh`, the `statusLine` key in `settings.json`) plus the Claude plugin. A machine that runs one host renders one home. A change is written once, on either host, and the others pick it up with their own `pull`.
+One repository holds the contract, agents, playbooks, prompts, skills and rig kit. Each machine keeps one clone and renders the homes of the hosts it runs: pi into its agent home (`AGENTS.md`, `HARNESS.md`, `agents/`, `prompts/`, `skills/`, `settings.json`), Claude Code into `~/.claude` (`CLAUDE.md`, `HARNESS.md`, `agents/`, `commands/`, `skills/`, `statusline.sh`, the `statusLine` key in `settings.json`) plus the Claude plugin, and Vibe into `~/.vibe` (`AGENTS.md`, `HARNESS.md`, `skills/`, `agents/` as TOML subagents). A machine that runs one host renders one home. A change is written once, on any host, and the others pick it up with their own `pull`.
 
 ## Quick start
 
@@ -12,7 +12,7 @@ One clone per machine serves every host on it. Clone it beside the homes, never 
 git clone https://github.com/DragonL57/agent-state.git ~/agent-state
 ```
 
-The clone is the state; the homes (`~/.pi/agent`, `~/.claude`) are rendered *from* it. Point the hosts at the clone with `AGENT_STATE_DIR`, then render:
+The clone is the state; the homes (`~/.pi/agent`, `~/.claude`, `~/.vibe`) are rendered *from* it. Point the hosts at the clone with `AGENT_STATE_DIR`, then render:
 
 ```bash
 export AGENT_STATE_DIR=~/agent-state    # add to your shell profile
@@ -21,17 +21,19 @@ python3 -I ~/agent-state/tools/state.py sync
 
 `sync` writes the configured homes from the clone. Everything below is the per-host install.
 
-> `~/agent-state` is the default when `AGENT_STATE_DIR` is unset, so the export is optional — set it if you cloned somewhere else.
+> The clone the script lives in is the default when `AGENT_STATE_DIR` is unset, so the export is optional — set it if you run the script from somewhere other than the clone.
 
 ### Which hosts a machine renders
 
 `sync`, `pull` and `check` touch only the hosts this machine is configured for. The tracked `config.json` names them:
 
 ```json
-{ "hosts": ["pi"] }
+{ "hosts": ["pi", "claude", "vibe"] }
 ```
 
-`AGENT_STATE_HOSTS` (comma-separated, for example `AGENT_STATE_HOSTS=claude`) overrides the file, so set it in the machine's shell profile when a pull rewrites `config.json` with the wrong list. With neither set, both homes render. `hosts` prints the list the manager is using.
+A machine that runs one host writes its own list, for example `{ "hosts": ["pi"] }`.
+
+`AGENT_STATE_HOSTS` (comma-separated, for example `AGENT_STATE_HOSTS=claude,vibe`) overrides the file, so set it in the machine's shell profile when a pull rewrites `config.json` with the wrong list. With neither set, all three homes render. `hosts` prints the list the manager is using.
 
 ## Install (Claude Code)
 
@@ -40,6 +42,20 @@ python3 -I ~/agent-state/tools/state.py sync
 ```
 
 The plugin adds `/pull`, `/status`, `/snapshot`, `/push` and `/sync` (unprefixed, because a command named `status` would collide with Claude Code's own built-in), and a hook that tells a session, once, when this host is behind origin.
+
+## Install (Vibe)
+
+Vibe has no plugin to install: the clone is the install. Run the quick start's `sync` with `vibe` in the host list, then start Vibe (or run `/reload`):
+
+```bash
+AGENT_STATE_HOSTS=vibe python3 -I ~/agent-state/tools/state.py sync
+```
+
+`sync` writes `~/.vibe/AGENTS.md` and `~/.vibe/HARNESS.md`, links every shared skill except the pi-only ones into `~/.vibe/skills/`, and renders each shared agent as a TOML subagent in `~/.vibe/agents/`. Vibe's own `config.toml`, `hooks.toml`, `.env`, sessions and caches stay host-only and are never tracked.
+
+The verbs are the `agent-state` skill: type `/agent-state` in Vibe, then ask for `pull`, `status`, `snapshot`, `push`, `sync`, `check` or `hosts`. The skill runs `~/agent-state/tools/state.py`; it does not re-implement the git steps.
+
+Vibe has no custom slash commands, so `shared/prompts/` is not rendered there. Ask for the same work in words.
 
 ## Install (pi)
 
@@ -88,7 +104,7 @@ Anything listed there is not in the repository; either move it into `~/agent-sta
 
 ## The verbs
 
-The same verbs run on both hosts and are implemented once, in `tools/state.py`.
+The same verbs run on every host and are implemented once, in `tools/state.py`.
 
 | Verb | What it does |
 | --- | --- |
@@ -105,42 +121,44 @@ No verb both records and publishes, and nothing runs Git from a lifecycle hook.
 ## Repository layout
 
 ```text
-shared/              the source of truth for both hosts
-  AGENTS.md          the full contract; Claude gets all of it, only paths differ
-  agents/            pi-frontmatter agent definitions, translated for Claude
-  prompts/           slash commands (/duo exists on both hosts)
+shared/              the source of truth for every host
+  AGENTS.md          the full contract; every host gets all of it, only paths differ
+  agents/            pi-frontmatter agent definitions, translated per host
+  prompts/           slash commands (/duo exists on pi and Claude Code)
   skills/            SKILL.md trees
   statusline/        the Claude Code status line, rendered to ~/.claude/statusline.sh
 hosts/pi/            pi-only: AGENTS.append.md, the portable settings.json subset
 hosts/claude/        Claude-only: output styles, the portable settings.json subset
                      (the tracked statusLine key, merged into the home's file)
+hosts/vibe/          Vibe-only: AGENTS.append.md
 rig/                 the rig kit: agents, skills, installers, bench tests, and
                      .rig/playbooks/ (the playbooks the contract reads)
 plugin/              the Claude Code plugin (commands, hooks)
 extensions/pi-state/ the pi extension: an /agent-state command over the manager
-tools/state.py       the manager both hosts call
+tools/state.py       the manager every host calls
 ```
 
 `docs/subagents.md` compares the ways Claude Code runs work at once and maps them onto this setup.
 
-`{{AGENT_STATE}}` is the only path a shared file may use. Both renderers resolve it to the clone, where playbooks, prompts and `tools/state.py` live; a shared file that hard-codes a home path is a bug.
+`{{AGENT_STATE}}` is the only path a shared file may use. Every renderer resolves it to the clone, where playbooks, prompts and `tools/state.py` live; a shared file that hard-codes a home path is a bug.
 
 ## Translation rules
 
-| pi | Claude Code |
-| --- | --- |
-| `tools: read, bash, write` | `tools: Read, Bash, Write, Edit` (`codemode` dropped) |
-| `thinking:`, `exclude_extensions:` | dropped |
-| `model:` on a shared agent | kept for pi, dropped for Claude: Claude agents inherit the session model and effort |
-| `description:`, folded | `name:` added, description folded to one line |
-| `prompts/*.md` | `commands/*.md` (description and `argument-hint` carry) |
-| skill directories | symlinked into `~/.claude/skills/`; every skill is shared, so both hosts receive the same set |
-| `shared/statusline/claude.sh` | copied to `~/.claude/statusline.sh`, executable |
-| `hosts/claude/settings.json` | its keys merged into `~/.claude/settings.json`; every other key stays |
+| pi | Claude Code | Vibe |
+| --- | --- | --- |
+| `tools: read, bash, write` | `tools: Read, Bash, Write, Edit` (`codemode` dropped) | `enabled_tools = ["read_file", "bash", "write_file", "edit"]` (`find`/`ls` dropped: the shell covers them) |
+| `thinking:`, `exclude_extensions:` | dropped | dropped |
+| `model:` on a shared agent | kept for pi, dropped for Claude: Claude agents inherit the session model and effort | dropped: Vibe subagents inherit the session model and effort |
+| `description:`, folded | `name:` added, description folded to one line | `description` kept, folded to one line |
+| agent file | `agents/<name>.md` | `agents/<name>.toml`, `agent_type = "subagent"`, body as `instructions` |
+| `prompts/*.md` | `commands/*.md` (description and `argument-hint` carry) | not rendered: Vibe has no custom slash commands |
+| skill directories | symlinked into `~/.claude/skills/`; every rendered skill is shared, so every host receives the same rendered set | symlinked into `~/.vibe/skills/` |
+| `shared/statusline/claude.sh` | copied to `~/.claude/statusline.sh`, executable | not rendered |
+| `hosts/claude/settings.json` | its keys merged into `~/.claude/settings.json`; every other key stays | not rendered: Vibe's `config.toml` stays host-only |
 
 ## Daily workflow
 
-The verbs are automated, and identical on both hosts:
+The verbs are automated, and identical on every host:
 
 ```text
 # pi
@@ -152,13 +170,17 @@ The verbs are automated, and identical on both hosts:
 /pull
 /snapshot "TASK-3 chore: tighten review playbook"
 /push
+
+# Vibe
+/agent-state
+# then ask for: pull, snapshot "TASK-3 chore: tighten review playbook", push
 ```
 
 The message starts with the code of the Backlog task the change serves.
 
 `snapshot` refuses a change whose message's first word is no task id, when the change touches a file that is not prose (`.md`, `.mdx`, `.txt`, `.rst`). A repo without a `backlog/` directory, and a repo before its first commit, have no such rule.
 
-`pull` is the one to run first on any machine: it fast-forwards the clone and re-renders the configured homes, so it is also how a host picks up a change made on the other. Without a plugin command, call the manager directly and get the same result:
+`pull` is the one to run first on any machine: it fast-forwards the clone and re-renders the configured homes, so it is also how a host picks up a change made on another. Without a plugin command, call the manager directly and get the same result:
 
 ```bash
 python3 -I ~/agent-state/tools/state.py pull     # fetch + fast-forward + re-render
@@ -167,7 +189,7 @@ python3 -I ~/agent-state/tools/state.py status   # what changed, and what drifte
 
 `pull` refuses a dirty tree rather than merging over it. `snapshot` records locally, `push` publishes; no single verb does both, so a change is reviewed before it leaves the machine.
 
-Never edit a rendered file (`~/.claude/CLAUDE.md`, the pi `AGENTS.md`): the next render overwrites it. Edit the shared tree and `sync`.
+Never edit a rendered file (`~/.claude/CLAUDE.md`, the pi `AGENTS.md`, `~/.vibe/AGENTS.md`, `~/.vibe/agents/*.toml`): the next render overwrites it. Edit the shared tree and `sync`.
 
 ## Secrets
 
@@ -185,11 +207,11 @@ npm run typecheck
 npm run check     # both
 ```
 
-The suite renders into temporary homes only. With `AGENT_STATE_TEST=1` set, the manager refuses to run unless `AGENT_PI_HOME` and `AGENT_CLAUDE_HOME` are given, so a test can never write into the real homes.
+The suite renders into temporary homes only. With `AGENT_STATE_TEST=1` set, the manager refuses to run unless every configured host's home variable is given (`AGENT_PI_HOME`, `AGENT_CLAUDE_HOME`, `AGENT_VIBE_HOME`). The guard only covers the calls that set it, so every test that spawns the manager hands over all three homes, and the suite clears an inherited `AGENT_STATE_HOSTS` before it starts.
 
 ## History
 
-A fork of [moejay/pi-state-sync](https://github.com/moejay/pi-state-sync) (MIT), renamed and extended to serve pi and Claude Code from one tree.
+A fork of [moejay/pi-state-sync](https://github.com/moejay/pi-state-sync) (MIT), renamed and extended to serve pi, Claude Code and Vibe from one tree.
 
 ## License
 
