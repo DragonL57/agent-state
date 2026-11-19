@@ -14,7 +14,9 @@ bullet below says otherwise. A table or fact below wins over the shared one.
   `connector_web_search` connector, not from a builtin. The shared "Disabled
   built-in tools" bullet describes pi's `settings.json`, not this host.
 - **The shared agents are subagents.** `~/.vibe/agents/*.toml` holds them with
-  `agent_type = "subagent"`; spawn one by its `config_name`.
+  `agent_type = "subagent"`; spawn one by its `config_name`. A changed agent
+  TOML needs a Vibe restart, not `/reload`. The agent registry is discovered
+  once per session.
 - **Vibe has no custom slash commands.** The shared prompts are not rendered
   here; ask for the same work in words.
 
@@ -55,6 +57,25 @@ done
   styles, geometry, contrast and DOM state; `list_network_requests` for the
   calls behind it). A screenshot is for the user to look at when they ask; it
   is never your evidence.
+
+## Subagents have no MCP
+
+A declared subagent, spawned by `config_name`, gets `skill` and the builtin
+tools. It gets no MCP tool. Vibe binds the child with
+`integrations_enabled=False` and an empty MCP grant
+(`mistralai_vibe_local_harness/vibe/_subagents/_configuration.py`), and it
+measures the child's ceiling against a catalogue built with `defer_mcp=True`
+(`vibe/app_server/_runtime.py`).
+
+Browser work for a reviewer is the orchestrator's. The orchestrator has the MCP
+tools, so it takes the measurement and hands the numbers over.
+
+An ad-hoc child, spawned with `instructions` and no `config_name`, gets every
+tool of each `mcp_chrome_devtools*` server. Each call is gated `ask`, and the
+child's approval request is refused, so the call fails with `tool_denied`
+unless the session runs `--auto-approve`.
+
+The gate asks, and the resolver allows the `skill` call.
 
 ## Skill routing (Vibe)
 

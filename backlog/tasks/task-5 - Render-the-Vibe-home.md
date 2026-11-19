@@ -4,7 +4,7 @@ title: Render the Vibe home
 status: Done
 assignee: []
 created_date: '2026-11-19T08:00:00Z'
-updated_date: '2026-11-19T08:00:00Z'
+updated_date: '2026-11-19T10:17:00Z'
 labels: []
 dependencies: []
 ordinal: 5000
@@ -24,4 +24,5 @@ Mistral Vibe is the third host. `sync` renders `~/.vibe/AGENTS.md` from the shar
 - [x] #4 `check` names a hand-edited Vibe contract or agent TOML
 - [x] #5 A machine that does not configure `vibe` renders no `~/.vibe`
 - [x] #6 `npm run check` passes
+- [x] #7 A rendered Vibe agent TOML carries `enabled_tools` of exactly the mapped pi tools plus `skill`, and no `mcp_` entry, because Vibe binds a declared subagent without integrations
 <!-- AC:END -->

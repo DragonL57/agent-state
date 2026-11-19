@@ -45,11 +45,13 @@ The plugin adds `/pull`, `/status`, `/snapshot`, `/push` and `/sync` (unprefixed
 
 ## Install (Vibe)
 
-Vibe has no plugin to install: the clone is the install. Run the quick start's `sync` with `vibe` in the host list, then start Vibe (or run `/reload`):
+Vibe has no plugin to install: the clone is the install. Run the quick start's `sync` with `vibe` in the host list:
 
 ```bash
 AGENT_STATE_HOSTS=vibe python3 -I ~/agent-state/tools/state.py sync
 ```
+
+Then start Vibe. `/reload` picks up the contract and the skills. A new or changed agent TOML needs a Vibe restart.
 
 `sync` writes `~/.vibe/AGENTS.md` and `~/.vibe/HARNESS.md`, links every shared skill except the pi-only ones into `~/.vibe/skills/`, and renders each shared agent as a TOML subagent in `~/.vibe/agents/`. Vibe's own `config.toml`, `hooks.toml`, `.env`, sessions and caches stay host-only and are never tracked.
 

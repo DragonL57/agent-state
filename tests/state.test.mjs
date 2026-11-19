@@ -492,39 +492,31 @@ test("every vibe subagent can load a skill, because the skill tool is the only w
 	}
 });
 
-test("every vibe subagent gets the MCP tools this host configures", () => {
+test("a vibe subagent gets no MCP tool, because Vibe binds a child without integrations", () => {
 	const root = fixture();
 	const pi = mkdtempSync(join(tmpdir(), "agent-pi-"));
 	const claude = mkdtempSync(join(tmpdir(), "agent-claude-"));
 	const vibe = mkdtempSync(join(tmpdir(), "agent-vibe-"));
 	const run = managerWithHomes(pi, claude, vibe);
 	try {
-		// No `extensions:` line: the grant comes from Vibe's own config, not
-		// from a pi extension name.
 		writeFileSync(
 			join(root, "shared", "agents", "worker.md"),
 			"---\ndescription: worker\ntools: read, bash\n---\n\nBody.\n",
 		);
-		// No host config: the machine runs no MCP server, so no glob is granted.
-		let result = run(root, "sync");
-		assert.equal(result.code, 0, result.err);
-		assert.match(
-			readFileSync(join(vibe, "agents", "worker.toml"), "utf8"),
-			/^enabled_tools = \["read_file", "bash", "skill"\]$/m,
-		);
-
-		// Vibe publishes an MCP tool as `<server>_<tool>`, so the server name is
-		// the glob. A server the host adds later is picked up by the next sync.
+		// The host runs an MCP server and the child still gets no tool from it:
+		// Vibe binds a declared subagent with `integrations_enabled=False` and an
+		// empty MCP grant, and measures the ceiling against a catalogue built
+		// with `defer_mcp=True`. A glob here would be a promise the file cannot
+		// keep.
 		writeFileSync(
 			join(vibe, "config.toml"),
 			'[[mcp_servers]]\nname = "chrome-devtools"\ntransport = "stdio"\ncommand = "npx"\n',
 		);
-		result = run(root, "sync");
+		const result = run(root, "sync");
 		assert.equal(result.code, 0, result.err);
-		assert.match(
-			readFileSync(join(vibe, "agents", "worker.toml"), "utf8"),
-			/^enabled_tools = \["read_file", "bash", "skill", "chrome-devtools_\*"\]$/m,
-		);
+		const agent = readFileSync(join(vibe, "agents", "worker.toml"), "utf8");
+		assert.match(agent, /^enabled_tools = \["read_file", "bash", "skill"\]$/m);
+		assert.doesNotMatch(agent, /mcp_/);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 		rmSync(pi, { recursive: true, force: true });
