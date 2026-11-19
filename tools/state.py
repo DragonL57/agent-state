@@ -36,6 +36,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -375,7 +376,28 @@ def _toml_string(value: str) -> str:
     return '"' + "".join(out) + '"'
 
 
-def vibe_agent(root: Path, path: Path) -> str:
+def _vibe_mcp_globs(home: Path) -> list[str]:
+    """The host's MCP servers as tool-name globs.
+
+    Vibe publishes an MCP tool as `<server>_<tool>`, so a server named
+    `chrome-devtools` answers to `chrome-devtools_*`. The server list is host
+    config, never tracked, so a machine without it grants no MCP tool.
+    """
+    try:
+        data = tomllib.loads((home / "config.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    servers = data.get("mcp_servers")
+    if not isinstance(servers, list):
+        return []
+    return [
+        f"{server['name']}_*"
+        for server in servers
+        if isinstance(server, dict) and isinstance(server.get("name"), str) and server["name"]
+    ]
+
+
+def vibe_agent(root: Path, path: Path, home: Path) -> str:
     """A pi agent definition as a Vibe subagent profile.
 
     Vibe reads agents as TOML. The body becomes `instructions`, the pi tool
@@ -386,6 +408,12 @@ def vibe_agent(root: Path, path: Path) -> str:
     warnings, so the renderer refuses the shapes it would drop: a reserved
     name, no description, an `enabled_tools` that matches nothing, a body a
     TOML literal string cannot hold, and instructions over Vibe's limit.
+
+    Two grants are Vibe's own, and both come from Vibe. A skill is reachable
+    only through the `skill` tool, where pi reads the skill's files with
+    `read`, so every agent gets it. The MCP servers are the ones this host
+    configures in `config.toml`, so every agent gets their tool names too:
+    `enabled_tools` is a whitelist, and a tool it does not name is denied.
     """
     if path.stem.casefold() == "main":
         raise StateError(
@@ -410,6 +438,11 @@ def vibe_agent(root: Path, path: Path) -> str:
             f"{path} declares only tools Vibe has no tool for "
             f"({', '.join(declared)}); an empty enabled_tools would grant every tool."
         )
+    if "skill" not in tools:
+        tools.append("skill")
+    for glob in _vibe_mcp_globs(home):
+        if glob not in tools:
+            tools.append(glob)
     body = rewrite_paths(body, root)
     if len(body) > VIBE_MAX_INSTRUCTION_CHARS:
         raise StateError(
@@ -639,7 +672,7 @@ def _render_vibe(root: Path, home: Path, written: list[str]) -> None:
     # Every agent is rendered before anything is written, so a refused one
     # leaves the home as it was instead of half-rendered.
     agents = {
-        f"{src.stem}.toml": vibe_agent(root, src)
+        f"{src.stem}.toml": vibe_agent(root, src, home)
         for src in sorted((SHARED / "agents").glob("*.md"))
     }
     (home / "AGENTS.md").write_text(host_contract(root, VIBE))
@@ -809,7 +842,7 @@ def drift(root: Path) -> Iterator[tuple[str, str]]:
         yield from _drift_harness("vibe", home, harness)
         expected: dict[str, str | None] = {}
         for src in sorted((SHARED / "agents").glob("*.md")):
-            expected[f"{src.stem}.toml"] = vibe_agent(root, src)
+            expected[f"{src.stem}.toml"] = vibe_agent(root, src, home)
         yield from _drift_agents("vibe", home, expected, VIBE_MARKER)
         yield from _drift_skills("vibe", home, skills)
     if "claude" in hosts:

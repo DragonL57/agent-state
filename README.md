@@ -146,7 +146,7 @@ tools/state.py       the manager every host calls
 
 | pi | Claude Code | Vibe |
 | --- | --- | --- |
-| `tools: read, bash, write` | `tools: Read, Bash, Write, Edit` (`codemode` dropped) | `enabled_tools = ["read_file", "bash", "write_file", "edit"]` (`find`/`ls` dropped: the shell covers them) |
+| `tools: read, bash, write` | `tools: Read, Bash, Write, Edit` (`codemode` dropped) | `enabled_tools = ["read_file", "bash", "write_file", "edit", "skill"]` (`find`/`ls` dropped: the shell covers them; `skill` is always added) |
 | `thinking:`, `exclude_extensions:` | dropped | dropped |
 | `model:` on a shared agent | kept for pi, dropped for Claude: Claude agents inherit the session model and effort | dropped: Vibe subagents inherit the session model and effort |
 | `description:`, folded | `name:` added, description folded to one line | `description` kept, folded to one line |

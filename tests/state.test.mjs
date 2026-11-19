@@ -441,7 +441,7 @@ test("vibe gets the contract, the shared skills, and the agents as TOML subagent
 			{ encoding: "utf8" },
 		);
 		assert.equal(tools.status, 0, tools.stderr);
-		assert.deepEqual(JSON.parse(tools.stdout), ["bash", "edit", "read_file", "write_file"]);
+		assert.deepEqual(JSON.parse(tools.stdout), ["bash", "edit", "read_file", "skill", "write_file"]);
 		assert.doesNotMatch(agent, /codemode/, "codemode has no Vibe equivalent");
 		assert.doesNotMatch(agent, /^(model|thinking)\s*=/m, "the subagent inherits the session model and effort");
 		assert.match(agent, new RegExp(literal(root)), "the body names the clone");
@@ -459,6 +459,72 @@ test("vibe gets the contract, the shared skills, and the agents as TOML subagent
 		const drift = run(root, "check");
 		assert.equal(drift.code, 1);
 		assert.match(drift.out, /the vibe copy at .*worker\.toml is stale/);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+		rmSync(pi, { recursive: true, force: true });
+		rmSync(claude, { recursive: true, force: true });
+		rmSync(vibe, { recursive: true, force: true });
+	}
+});
+
+test("every vibe subagent can load a skill, because the skill tool is the only way in", () => {
+	const root = fixture();
+	const pi = mkdtempSync(join(tmpdir(), "agent-pi-"));
+	const claude = mkdtempSync(join(tmpdir(), "agent-claude-"));
+	const vibe = mkdtempSync(join(tmpdir(), "agent-vibe-"));
+	const run = managerWithHomes(pi, claude, vibe);
+	try {
+		// A source that names no skill tool at all: on pi it reads a skill's
+		// files with `read`, on Vibe the `skill` tool is the only path.
+		writeFileSync(
+			join(root, "shared", "agents", "worker.md"),
+			"---\ndescription: worker\ntools: read, bash\n---\n\nBody.\n",
+		);
+		const result = run(root, "sync");
+		assert.equal(result.code, 0, result.err);
+		const agent = readFileSync(join(vibe, "agents", "worker.toml"), "utf8");
+		assert.match(agent, /^enabled_tools = \["read_file", "bash", "skill"\]$/m);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+		rmSync(pi, { recursive: true, force: true });
+		rmSync(claude, { recursive: true, force: true });
+		rmSync(vibe, { recursive: true, force: true });
+	}
+});
+
+test("every vibe subagent gets the MCP tools this host configures", () => {
+	const root = fixture();
+	const pi = mkdtempSync(join(tmpdir(), "agent-pi-"));
+	const claude = mkdtempSync(join(tmpdir(), "agent-claude-"));
+	const vibe = mkdtempSync(join(tmpdir(), "agent-vibe-"));
+	const run = managerWithHomes(pi, claude, vibe);
+	try {
+		// No `extensions:` line: the grant comes from Vibe's own config, not
+		// from a pi extension name.
+		writeFileSync(
+			join(root, "shared", "agents", "worker.md"),
+			"---\ndescription: worker\ntools: read, bash\n---\n\nBody.\n",
+		);
+		// No host config: the machine runs no MCP server, so no glob is granted.
+		let result = run(root, "sync");
+		assert.equal(result.code, 0, result.err);
+		assert.match(
+			readFileSync(join(vibe, "agents", "worker.toml"), "utf8"),
+			/^enabled_tools = \["read_file", "bash", "skill"\]$/m,
+		);
+
+		// Vibe publishes an MCP tool as `<server>_<tool>`, so the server name is
+		// the glob. A server the host adds later is picked up by the next sync.
+		writeFileSync(
+			join(vibe, "config.toml"),
+			'[[mcp_servers]]\nname = "chrome-devtools"\ntransport = "stdio"\ncommand = "npx"\n',
+		);
+		result = run(root, "sync");
+		assert.equal(result.code, 0, result.err);
+		assert.match(
+			readFileSync(join(vibe, "agents", "worker.toml"), "utf8"),
+			/^enabled_tools = \["read_file", "bash", "skill", "chrome-devtools_\*"\]$/m,
+		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 		rmSync(pi, { recursive: true, force: true });
