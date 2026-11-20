@@ -5,48 +5,17 @@ description: Write a prompt, instruction, context file, or skill that a model ca
 
 # Instruction craft
 
-Three jobs: the sentence, the session, the placement. Section 1 is the evidence
-behind the rest.
+Three jobs: the sentence, the session, the placement.
 
-## 1. What the evidence says
-
-- **Rules help; content barely matters.** 679 rule files and 5,000+ runs put
-  every rule condition 6.9–13.8pp above no rules, and random rules tie with
-  curated ones. The mechanism looks like context priming, not instruction
-  content. (Zhang et al., 2604.11088)
-- **Polarity is the one content property that separates good from bad.** Every
-  individually beneficial rule was a negative constraint; every individually
-  harmful one was a positive directive. "Do not refactor unrelated code" was the
-  strongest, worth a 20pp drop when removed. (2604.11088)
-- **Presence is not correctness.** Context files do not measurably raise task
-  success and add 20%+ to inference cost. The instructions are well followed;
-  repository overviews are not helpful. A two-agent ablation bounds the
-  correctness effect at ≤10–15pp and finds the real AGENTS.md never converts a
-  near-miss to a pass. (Gloaguen et al., 2602.11988; 2607.27250)
-- **File structure does not matter.** Over 1,650 sessions, size from 25 to 500
-  lines, instruction position, file architecture, and a contradicting secondary
-  file all produced no detectable compliance effect. (McMillan, 2605.10039)
-- **What decays is within-session.** Each additional function the agent writes
-  is associated with ~5.6% lower odds of compliance (OR 0.944). A rule that must
-  hold across a long session needs re-surfacing, not a shorter file. (2605.10039)
-- **Developer-written beats generated.** Developer-committed files outperform
-  LLM-generated ones by ~7pp; generated files add ~23% cost for ~2pp lower
-  success. (2602.11988)
-- **Presence buys speed.** An AGENTS.md cut median wall-clock 28.6% and median
-  output tokens 16.6%, while median total tokens rose slightly.
-  (Chatlatanagulchai et al., 2601.20404)
-
-## 2. The sentence
+## 1. The sentence
 
 ### Write the constraint, not the prescription
 
 Bad: `Write clean code.`
 Good: `Do not refactor or reformat code unrelated to the task.`
 
-The evidence in section 1 found negative constraints help and positive
-directives hurt on average. When a constraint can carry the rule, write the
-constraint, because the reader can check it against the code. A command the
-agent must run stays a command: the command is its own check.
+A constraint can be checked against the code. A command the agent must run stays
+a command: the command is its own check.
 
 ### One action per rule, imperative mood
 
@@ -69,8 +38,7 @@ follows.
 Bad: `Be careful with the database.`
 Good: `Before any write to prod, run pnpm db:dry-run and paste the row count.`
 
-"Careful" has no moment attached, so it fires never or always. For whether the
-action itself is checkable, see section 2's altitude test below.
+"Careful" has no moment attached, so it fires never or always.
 
 ### A placeholder is a defect
 
@@ -107,23 +75,24 @@ Good: `Do not leave a function longer than the one it replaces.`
 - Do not refactor or reformat code unrelated to the task.
 ```
 
-The header costs nothing and says what the file governs. Three lines are
-negative constraints, the class the evidence says helps. One names the check.
-One is condition-first: the schema change is the trigger, the migration is the
-action. Every rule is checkable, and none of it repeats what the code already
-says.
+The header costs nothing and says what the file governs. The lines are negative
+constraints, one names a check, and one is condition-first: the schema change is
+the trigger, the migration is the action. Every rule is checkable, and none of it
+repeats what the code already says.
 
-## 3. What to cut
+## 2. What to cut
 
 - Theory, philosophy, or a "why" with no imperative attached.
 - Generic positive prescriptions: "follow code style", "keep functions small",
-  "write clean code". This is the harmful polarity class.
+  "write clean code".
 - Repository overviews, directory trees, architecture narratives.
 - Anything the agent can read in the code, the README, or a manifest.
 - Anything the harness already injects: tool descriptions, tool schemas, the
   system prompt. The harness copy is current; yours is a stale copy waiting to
   happen.
 - A second home for a rule that already lives elsewhere in the file.
+- A citation, a link, or an author name. The rule stands on its own, and a
+  source line is one more thing to keep current.
 
 What survives: exact commands with the flag that matters, rules that differ from
 the default, boundaries, and project gotchas that cost real time when discovered
@@ -131,7 +100,7 @@ wrong.
 
 The cut list is a test set for a draft, so its items are nouns.
 
-## 4. The session
+## 3. The session
 
 ### Cap output at the source
 
@@ -153,7 +122,7 @@ and adds nothing.
 ### Keep the plan in the todo list, not in prose
 
 Bad: restating the remaining steps in a message every turn.
-Good: `todo update` the status; one sentence on what changed.
+Good: update the todo status; one sentence on what changed.
 
 A prose plan goes stale the moment it is written and is paid for on every
 subsequent turn. The todo list is the plan.
@@ -163,17 +132,17 @@ subsequent turn. The todo list is the plan.
 Bad: `/compact`
 Good: `/compact keep open todo ids and their subjects`
 
-pi takes custom instructions per call. Say what the summary must keep, or the
-summarizer keeps what it finds interesting.
+Say what the summary must keep, or the summarizer keeps what it finds
+interesting.
 
 ### Batch independent reads
 
-Bad: three `read` calls in three turns for three files you already know you need.
-Good: three `read` calls in one turn, then a fourth only if it depends on them.
+Bad: three reads in three turns for three files you already know you need.
+Good: three reads in one turn, then a fourth only if it depends on them.
 
-`AGENTS.md` Research first states the rule. This is the shape it takes.
+Three reads in one turn pay one turn's cost.
 
-## 5. Where the rule goes
+## 4. Where the rule goes
 
 Ask in this order. Stop at the first yes.
 
@@ -186,6 +155,10 @@ Ask in this order. Stop at the first yes.
 5. Does it run on demand, once, with arguments? Then a prompt template in the
    harness home's `prompts/` directory.
 
+The AGENTS.md format sets the file's shape: plain markdown, no required headings,
+no required fields, and one file per package as needed. Any content is legal in
+it. The rules above govern what goes in.
+
 ### Put a tool where it fires
 
 Bad: a twelve-row table of every tool with a "use when" and a "never when".
@@ -193,8 +166,8 @@ Good: the tool named in the step that needs it; the table kept for tools with no
 flow position.
 
 A catalogue makes the model map a name back to a situation on every turn. A step
-in the flow is already a situation. `AGENTS.md` Tool routing is the table for the
-tools that have no position.
+in the flow is already a situation. Keep a routing table for the tools that have
+no position.
 
 ### Extend before you create
 
@@ -216,16 +189,11 @@ it adds a coin flip.
 - Do not open two skills on the same phrase. Overlapping triggers mean the model
   picks one and the other never loads.
 
-### A short skill is a line in AGENTS.md
+### Writing the skill
 
-Bad: a four-line skill for one rule.
-Good: the rule in `AGENTS.md`, or a skill long enough to be worth a routing
-decision.
+How a skill is laid out, kept short, and tested: see `references/skills.md`.
 
-A skill costs its body whenever it loads, plus a routing decision every time it
-might. Below roughly a screen of procedure, the standing file is cheaper.
-
-## 6. Trimming an existing file
+## 5. Trimming an existing file
 
 1. Snapshot it. You will diff against this at the end.
 2. Inventory rules, not lines. A bullet carrying two rules becomes two entries.
@@ -238,24 +206,23 @@ might. Below roughly a screen of procedure, the standing file is cheaper.
    once; every cut has its destination still in place.
 7. Diff. Read every added line and ask which rule it serves.
 8. Check sibling context files the loader picks up (`CLAUDE.md`, `.cursorrules`)
-   for a rule that now lives in neither. `/reload` when done: a running session
-   keeps the old file.
+   for a rule that now lives in neither. Reload the session when done: a running
+   session keeps the old file.
 
-## 7. Sources
+### What the loader picks first
 
-- Zhang, Wang, Cui, Qiu, Li, Zhu et al., "Guardrails Beat Guidance: A
-  Large-Scale Study of Rules, Skills, and Persistent Configuration for Coding
-  Agents", arXiv:2604.11088
-- Gloaguen, Mündler-Sasahara, Müller, Raychev, Vechev, "Evaluating AGENTS.md:
-  Are Repository-Level Context Files Helpful for Coding Agents?", arXiv:2602.11988
-- McMillan, "Instruction Adherence in Coding Agent Configuration Files: A
-  Factorial Study of Four File-Structure Variables", arXiv:2605.10039
-- "Do Context Files Help Coding Agents? A Two-Agent Ablation Study on Real
-  Repositories", arXiv:2607.27250
-- Chatlatanagulchai et al., "On the Impact of AGENTS.md Files on the Efficiency
-  of AI Coding Agents", arXiv:2601.20404
-- Anthropic, "Skill authoring best practices" and "Agent Skills overview" —
-  <https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices>
-- Anthropic, "Effective context engineering for AI agents" —
-  <https://www.anthropic.com/research/effective-context-engineering-for-ai-agents>
-- agents.md, Agentic AI Foundation — <https://agents.md/>
+The file nearest the one being edited wins. A package file overrides the root
+file.
+
+The user's own message overrides every file. Write a rule that the user will
+want to break on purpose, and it will be broken on purpose.
+
+## 6. The session that forgets
+
+A rule holds at the top of a session and weakens as the work goes on. What
+keeps a rule is re-surfacing it at the moment it fires, and a check the agent
+runs, so the rule comes back as a command result rather than a memory.
+
+- Do not shorten a long file to make its rules stick. Put the rule where the
+  step that needs it is.
+- Do not trust a summary to keep a rule the file states. State it in the step.

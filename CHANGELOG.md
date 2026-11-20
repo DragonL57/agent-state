@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### TASK-6 Cut the sources and split out the skill rules in instruction-craft
+
+- The evidence section and the source list are gone. Rules that survive are stated in the sentence section, and no vendor, model, author, arXiv id, or URL stays in the skill.
+- `references/skills.md` holds the skill-authoring rules: layout, the description as routing key, the 500-line cap, one-level references, scripts, steps and checks, words, and testing with a second session. `SKILL.md` links it once, from the "Writing the skill" heading.
+- The "Where the rule goes" section carries the AGENTS.md format: plain markdown, no required fields, one file per package, the nearest file wins, and the user's prompt overrides every file.
+
 ### TASK-5 Render the Vibe home
 
 - Vibe is the third host. `sync` renders `~/.vibe/AGENTS.md` from `shared/AGENTS.md` plus `hosts/vibe/AGENTS.append.md`, symlinks every shared skill except the pi-only ones into `~/.vibe/skills/`, and writes each shared agent as `~/.vibe/agents/<name>.toml`.
